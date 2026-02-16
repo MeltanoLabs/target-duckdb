@@ -1,0 +1,31 @@
+[project]
+name = "target-duckdb"
+version = "0.8.1"
+description = "Singer.io target for loading data into DuckDB"
+authors = [
+    { name = "Josh Wills", email = "josh@joshwills.com" }
+]
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+dependencies = [
+    "jsonschema>=3.2.0",
+    "duckdb>=1.0.0",
+]
+
+[dependency-groups]
+dev = [
+    { include-group = "test" }
+]
+test = [
+    "pytest",
+    "pylint",
+    "pytest-cov",
+]
+
+[project.scripts]
+target-duckdb = "target_duckdb:main"
+
+[build-system]
+requires = ["flit_core >=3.12,<4"]
+build-backend = "flit_core.buildapi"
