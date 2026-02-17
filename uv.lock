@@ -594,7 +594,6 @@ wheels = [
 
 [[package]]
 name = "target-duckdb"
-version = "0.8.1"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
