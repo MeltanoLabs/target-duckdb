@@ -8,6 +8,7 @@ import sys
 import tempfile
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 import duckdb
 from jsonschema import Draft7Validator, FormatChecker
@@ -128,16 +129,16 @@ def duckdb_connect(config):
 # pylint: disable=too-many-locals,too-many-branches,too-many-statements,invalid-name,consider-iterating-dictionary
 def persist_lines(connection, config, lines) -> None:
     """Read singer messages and process them line by line"""
-    state = None
-    flushed_state = None
-    schemas = {}
+    state: dict[str, Any] | None = None
+    flushed_state: dict[str, Any] | None = None
+    schemas: dict[str, dict[str, Any]] = {}
     key_properties = {}
-    validators = {}
-    records_to_load = {}
-    row_count = {}
-    stream_to_sync = {}
-    total_row_count = {}
-    batch_size_rows = config.get("batch_size_rows", DEFAULT_BATCH_SIZE_ROWS)
+    validators: dict[str, Draft7Validator] = {}
+    records_to_load: dict[str, dict[str, Any]] = {}
+    row_count: dict[str, int] = {}
+    stream_to_sync: dict[str, DbSync] = {}
+    total_row_count: dict[str, int] = {}
+    batch_size_rows: int = config.get("batch_size_rows", DEFAULT_BATCH_SIZE_ROWS)
 
     # Loop over lines from stdin
     for line in lines:
@@ -197,9 +198,9 @@ def persist_lines(connection, config, lines) -> None:
 
             # append record
             if config.get("add_metadata_columns") or config.get("hard_delete"):
-                records_to_load[stream][
-                    primary_key_string
-                ] = add_metadata_values_to_record(o)
+                records_to_load[stream][primary_key_string] = (
+                    add_metadata_values_to_record(o)
+                )
             else:
                 records_to_load[stream][primary_key_string] = o["record"]
 
@@ -243,7 +244,8 @@ def persist_lines(connection, config, lines) -> None:
 
             schemas[stream] = float_to_decimal(o["schema"])
             validators[stream] = Draft7Validator(
-                schemas[stream], format_checker=FormatChecker()
+                schemas[stream],
+                format_checker=FormatChecker(),
             )
 
             # flush records from previous stream SCHEMA

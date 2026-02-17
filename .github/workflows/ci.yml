@@ -19,7 +19,12 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [ '3.11' ]
+        python-version:
+        - '3.10'
+        - '3.11'
+        - '3.12'
+        - '3.13'
+        - '3.14'
 
     steps:
       - name: Checkout repository
@@ -36,11 +41,11 @@ jobs:
         with:
           python-version: ${{ steps.setup-python.outputs.python-version }}
 
-      - name: Unit Tests
-        run: make unit_test
+      - name: Install Tox
+        run: uv tool install --with tox-gh --with tox-uv tox
 
-      - name: Integration Tests
+      - name: Run Tests
         env:
           LOGGING_CONF_FILE: ./sample_logging.conf
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
-        run: make integration_test
+        run: tox

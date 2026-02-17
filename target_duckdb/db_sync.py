@@ -112,7 +112,9 @@ def flatten_schema(d, parent_key=[], sep="__", level=0, max_level=0):
                     list(v.values())[0][0]["type"] = ["null", "object"]
                     items.append((new_key, list(v.values())[0][0]))
 
-    key_func = lambda item: item[0]
+    def key_func(item):
+        return item[0]
+
     sorted_items = sorted(items, key=key_func)
     for k, g in itertools.groupby(sorted_items, key=key_func):
         if len(list(g)) > 1:
@@ -329,7 +331,9 @@ class DbSync:
         if without_schema:
             return f'"{pg_table_name.lower()}"'
         elif self.catalog_name:
-            return f'"{self.catalog_name}"."{self.schema_name}"."{pg_table_name.lower()}"'
+            return (
+                f'"{self.catalog_name}"."{self.schema_name}"."{pg_table_name.lower()}"'
+            )
         else:
             return f'"{self.schema_name}"."{pg_table_name.lower()}"'
 
@@ -386,7 +390,11 @@ class DbSync:
             )
             for record in records:
                 csvwriter.writerow(self.record_to_flattened(record))
-        cur.execute("COPY {} FROM '{}' WITH (HEADER false, new_line '\\r\\n')".format(temp_table, temp_file_csv))
+        cur.execute(
+            "COPY {} FROM '{}' WITH (HEADER false, new_line '\\r\\n')".format(
+                temp_table, temp_file_csv
+            )
+        )
 
         if len(self.stream_schema_message["key_properties"]) > 0:
             cur.execute(self.update_from_temp_table(temp_table))
@@ -403,9 +411,7 @@ class DbSync:
         if len(stream_schema_message["key_properties"]) == 0:
             return """INSERT INTO {} ({})
                     (SELECT s.* FROM {} s)
-                    """.format(
-                table, ", ".join(columns), temp_table
-            )
+                    """.format(table, ", ".join(columns), temp_table)
 
         return """INSERT INTO {} ({})
         (SELECT s.* FROM {} s LEFT OUTER JOIN {} t ON {} WHERE {})

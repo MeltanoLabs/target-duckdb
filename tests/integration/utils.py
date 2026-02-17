@@ -1,5 +1,4 @@
 import os
-import json
 
 
 def get_db_config():

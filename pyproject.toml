@@ -15,12 +15,22 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    { include-group = "test" }
+    { include-group = "test" },
+    { include-group = "typing" },
+]
+lint = [
+    "ruff>=0.15.1",
 ]
 test = [
-    "pytest",
-    "pylint",
-    "pytest-cov",
+    "coverage>=7.13",
+    "pytest>=9",
+    "python-dotenv>=1.2.1",
+]
+typing = [
+    { include-group = "test" },
+    "mypy>=1.19.1",
+    "ty>=0.0.17",
+    "types-jsonschema>=4.26.0.20260202",
 ]
 
 [project.scripts]
@@ -29,3 +39,50 @@ target-duckdb = "target_duckdb:main"
 [build-system]
 requires = ["flit_core >=3.12,<4"]
 build-backend = "flit_core.buildapi"
+
+[tool.pytest]
+addopts = [ "-v" ]
+minversion = "9"
+
+[tool.tox]
+min_version = "4.22"
+requires = [ "tox", "tox-uv", "tox-gh>=1.6.1" ]
+env_list = [
+  "lint",
+  "typing",
+  "unit",
+  "integration",
+]
+
+[tool.tox.env_run_base]
+runner = "uv-venv-lock-runner"
+pass_env = [ "MOTHERDUCK_TOKEN" ]
+dependency_groups = [ "test" ]
+commands = [ [ "pytest" ] ]
+
+[tool.tox.env.lint]
+dependency_groups = [ "lint" ]
+commands = [
+    [ "ruff", "check", "target_duckdb", "tests" ],
+    [ "ruff", "format", "--check", "target_duckdb", "tests" ],
+]
+
+[tool.tox.env.unit]
+commands = [ [ "pytest", "tests/unit" ] ]
+
+[tool.tox.env.integration]
+commands = [ [ "pytest", "tests/integration" ] ]
+
+[tool.tox.env.typing]
+dependency_groups = [ "typing" ]
+commands = [
+  [ "mypy", "target_duckdb", "tests" ],
+#   [ "ty", "check", "target_duckdb", "tests" ],
+]
+
+[tool.tox.gh.python]
+"3.14" = [ "lint", "unit", "integration", "typing" ]
+"3.13" = [ "unit" ]
+"3.12" = [ "unit" ]
+"3.11" = [ "unit" ]
+"3.10" = [ "unit" ]

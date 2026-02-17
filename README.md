@@ -10,10 +10,10 @@ First, make sure Python 3 is installed on your system or follow these
 installation instructions for [Mac](http://docs.python-guide.org/en/latest/starting/install3/osx/) or
 [Ubuntu](https://www.digitalocean.com/community/tutorials/how-to-install-python-3-and-set-up-a-local-programming-environment-on-ubuntu-16-04).
 
-It's recommended to use a virtualenv:
+It's recommended to use [uv]:
 
 ```bash
-make venv
+uv sync
 ```
 
 ### To run
@@ -58,28 +58,30 @@ Additional options in `config.json`:
 | validate_records                    | Boolean |            | (Default: False) Validate every single record message to the corresponding JSON schema. This option is disabled by default and invalid RECORD messages will fail only at load time by DuckDB. Enabling this option will detect invalid records earlier but could cause performance degradation. |
 | temp_dir                            | String  |            | (Default: platform-dependent) Directory of temporary CSV files with RECORD messages. |
 
-### To run tests:
+### Running Tests
 
-1. Install python dependencies in a virtual env and run unit and integration tests
+1. Install Tox
+
 ```
-  make venv
+uv tool install --with tox-gh --with tox-uv tox
 ```
 
 2. To run unit tests:
+
 ```
-  make unit_test
+tox -e unit
 ```
 
 3. To run integration tests:
 ```
-  make integration_test
+tox -e integration
 ```
 
-### To run pylint:
+### Linting
 
 1. Install python dependencies and run python linter
 ```
- make venv pylint
+tox -e lint
 ```
 
 ## License
@@ -87,3 +89,5 @@ Additional options in `config.json`:
 Apache License Version 2.0
 
 See [LICENSE](LICENSE) to see the full text.
+
+[uv]: https://docs.astral.sh/uv/

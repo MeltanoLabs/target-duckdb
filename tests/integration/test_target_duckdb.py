@@ -1,98 +1,62 @@
-import unittest
-import os
+from __future__ import annotations
+
 import json
 import datetime
-import shutil
+import unicodedata
+from pathlib import Path
+from unittest import mock
+
+import duckdb
 import target_duckdb
+from typing import Any
 
 import pytest
-from unittest import mock
 
 from target_duckdb import RecordValidationException
 from target_duckdb.db_sync import DbSync
+
+from conftest import (
+    assert_metadata_columns_exist,
+    assert_metadata_columns_not_exist,
+    remove_metadata_columns_from_rows,
+)
 
 try:
     import tests.utils as test_utils
 except ImportError:
     import utils as test_utils
 
-METADATA_COLUMNS = ["_sdc_extracted_at", "_sdc_batched_at", "_sdc_deleted_at"]
 
-
-class TestIntegration(unittest.TestCase):
+@pytest.mark.usefixtures("prepare")
+class TestIntegration:
     """
     Integration Tests
     """
 
-    @classmethod
-    def setUp(cls):
-        cls.config = test_utils.get_test_config()
-        print(cls.config)
-        cls.maxDiff = None
-        cls.connection = target_duckdb.duckdb_connect(cls.config)
-        duckdb = DbSync(cls.connection, cls.config)
-        if cls.config["default_target_schema"]:
-            duckdb.query(
-                "DROP SCHEMA IF EXISTS {} CASCADE".format(
-                    cls.config["default_target_schema"]
-                )
-            )
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.connection.close()
-
-    @staticmethod
-    def remove_metadata_columns_from_rows(rows):
-        """Removes metadata columns from a list of rows"""
-        d_rows = []
-        for r in rows:
-            # Copy the original row to a new dict to keep the original dict
-            # and remove metadata columns
-            d_row = r.copy()
-            for md_c in METADATA_COLUMNS:
-                d_row.pop(md_c, None)
-
-            # Add new row without metadata columns to the new list
-            d_rows.append(d_row)
-
-        return d_rows
-
-    def assert_metadata_columns_exist(self, rows):
-        """This is a helper assertion that checks if every row in a list has metadata columns"""
-        for r in rows:
-            for md_c in METADATA_COLUMNS:
-                self.assertTrue(md_c in r)
-
-    def assert_metadata_columns_not_exist(self, rows):
-        """This is a helper assertion that checks metadata columns don't exist in any row"""
-        for r in rows:
-            for md_c in METADATA_COLUMNS:
-                self.assertFalse(md_c in r)
-
     def assert_multiple_streams_are_into_duckdb(
-        self, should_metadata_columns_exist=False, should_hard_deleted_rows=False
+        self,
+        target_schema: str,
+        instance: DbSync,
+        *,
+        should_metadata_columns_exist: bool = False,
+        should_hard_deleted_rows: bool = False,
     ):
         """
         This is a helper assertion that checks if every data from the message-with-multiple-streams.json
         file is available in DuckDB tables correctly.
         Useful to check different loading methods without duplicating assertions
         """
-        duckdb = DbSync(self.connection, self.config)
-        # Identify target schema name
-        target_schema = "integration_test_schema"
-
         # Get loaded rows from tables
-        table_one = duckdb.query(
+        table_one = instance.query(
             "SELECT * FROM {}.test_table_one ORDER BY c_pk".format(target_schema)
         )
-        table_two = duckdb.query(
+        table_two = instance.query(
             "SELECT * FROM {}.test_table_two ORDER BY c_pk".format(target_schema)
         )
-        table_three = duckdb.query(
+        table_three = instance.query(
             "SELECT * FROM {}.test_table_three ORDER BY c_pk".format(target_schema)
         )
-        table_four = duckdb.query(
+        table_four = instance.query(
             "SELECT * FROM {}.test_table_four ORDER BY c_pk".format(target_schema)
         )
 
@@ -101,9 +65,7 @@ class TestIntegration(unittest.TestCase):
         # ----------------------------------------------------------------------
         expected_table_one = [{"c_int": 1, "c_pk": 1, "c_varchar": "1"}]
 
-        self.assertEqual(
-            self.remove_metadata_columns_from_rows(table_one), expected_table_one
-        )
+        assert remove_metadata_columns_from_rows(table_one) == expected_table_one
 
         # ----------------------------------------------------------------------
         # Check rows in table_tow
@@ -134,9 +96,7 @@ class TestIntegration(unittest.TestCase):
                 }
             ]
 
-        self.assertEqual(
-            self.remove_metadata_columns_from_rows(table_two), expected_table_two
-        )
+        assert remove_metadata_columns_from_rows(table_two) == expected_table_two
 
         # ----------------------------------------------------------------------
         # Check rows in table_three
@@ -179,9 +139,7 @@ class TestIntegration(unittest.TestCase):
                 },
             ]
 
-        self.assertEqual(
-            self.remove_metadata_columns_from_rows(table_three), expected_table_three
-        )
+        assert remove_metadata_columns_from_rows(table_three) == expected_table_three
 
         # ----------------------------------------------------------------------
         # Check rows in table_four
@@ -229,38 +187,39 @@ class TestIntegration(unittest.TestCase):
                 },
             ]
 
-        self.assertEqual(
-            self.remove_metadata_columns_from_rows(table_four), expected_table_four
-        )
+        assert remove_metadata_columns_from_rows(table_four) == expected_table_four
 
         # ----------------------------------------------------------------------
         # Check if metadata columns exist or not
         # ----------------------------------------------------------------------
         if should_metadata_columns_exist:
-            self.assert_metadata_columns_exist(table_one)
-            self.assert_metadata_columns_exist(table_two)
-            self.assert_metadata_columns_exist(table_three)
-            self.assert_metadata_columns_exist(table_four)
+            assert_metadata_columns_exist(table_one)
+            assert_metadata_columns_exist(table_two)
+            assert_metadata_columns_exist(table_three)
+            assert_metadata_columns_exist(table_four)
         else:
-            self.assert_metadata_columns_not_exist(table_one)
-            self.assert_metadata_columns_not_exist(table_two)
-            self.assert_metadata_columns_not_exist(table_three)
-            self.assert_metadata_columns_not_exist(table_four)
+            assert_metadata_columns_not_exist(table_one)
+            assert_metadata_columns_not_exist(table_two)
+            assert_metadata_columns_not_exist(table_three)
+            assert_metadata_columns_not_exist(table_four)
 
-    def assert_logical_streams_are_in_duckdb(self, should_metadata_columns_exist=False):
+    def assert_logical_streams_are_in_duckdb(
+        self,
+        target_schema: str,
+        instance: DbSync,
+        should_metadata_columns_exist=False,
+    ):
         # Get loaded rows from tables
-        duckdb = DbSync(self.connection, self.config)
-        target_schema = self.config.get("default_target_schema", "")
-        table_one = duckdb.query(
+        table_one = instance.query(
             "SELECT * FROM {}.logical1_table1 ORDER BY cid".format(target_schema)
         )
-        table_two = duckdb.query(
+        table_two = instance.query(
             "SELECT * FROM {}.logical1_table2 ORDER BY cid".format(target_schema)
         )
-        table_three = duckdb.query(
+        table_three = instance.query(
             "SELECT * FROM {}.logical2_table1 ORDER BY cid".format(target_schema)
         )
-        table_four = duckdb.query(
+        table_four = instance.query(
             "SELECT cid, ctimentz, ctimetz FROM {}.logical1_edgydata WHERE CID IN(1,2,3,4,5,6,8,9) ORDER BY cid".format(
                 target_schema
             )
@@ -331,56 +290,58 @@ class TestIntegration(unittest.TestCase):
 
         # Check if metadata columns replicated correctly
         if should_metadata_columns_exist:
-            self.assert_metadata_columns_exist(table_one)
-            self.assert_metadata_columns_exist(table_two)
-            self.assert_metadata_columns_exist(table_three)
-            self.assert_metadata_columns_not_exist(table_four)
+            assert_metadata_columns_exist(table_one)
+            assert_metadata_columns_exist(table_two)
+            assert_metadata_columns_exist(table_three)
+            assert_metadata_columns_not_exist(table_four)
         else:
-            self.assert_metadata_columns_not_exist(table_one)
-            self.assert_metadata_columns_not_exist(table_two)
-            self.assert_metadata_columns_not_exist(table_three)
-            self.assert_metadata_columns_not_exist(table_four)
+            assert_metadata_columns_not_exist(table_one)
+            assert_metadata_columns_not_exist(table_two)
+            assert_metadata_columns_not_exist(table_three)
+            assert_metadata_columns_not_exist(table_four)
 
         # Check if data replicated correctly
-        assert self.remove_metadata_columns_from_rows(table_one) == expected_table_one
-        assert self.remove_metadata_columns_from_rows(table_two) == expected_table_two
-        assert (
-            self.remove_metadata_columns_from_rows(table_three) == expected_table_three
-        )
-        assert self.remove_metadata_columns_from_rows(table_four) == expected_table_four
+        assert remove_metadata_columns_from_rows(table_one) == expected_table_one
+        assert remove_metadata_columns_from_rows(table_two) == expected_table_two
+        assert remove_metadata_columns_from_rows(table_three) == expected_table_three
+        assert remove_metadata_columns_from_rows(table_four) == expected_table_four
 
-    def assert_logical_streams_are_in_duckdb_and_are_empty(self):
+    def assert_logical_streams_are_in_duckdb_and_are_empty(
+        self,
+        target_schema: str,
+        instance: DbSync,
+    ):
         # Get loaded rows from tables
-        duckdb = DbSync(self.connection, self.config)
-        target_schema = self.config.get("default_target_schema", "")
-        table_one = duckdb.query(
+        table_one = instance.query(
             "SELECT * FROM {}.logical1_table1 ORDER BY CID".format(target_schema)
         )
-        table_two = duckdb.query(
+        table_two = instance.query(
             "SELECT * FROM {}.logical1_table2 ORDER BY CID".format(target_schema)
         )
-        table_three = duckdb.query(
+        table_three = instance.query(
             "SELECT * FROM {}.logical2_table1 ORDER BY CID".format(target_schema)
         )
-        table_four = duckdb.query(
+        table_four = instance.query(
             "SELECT * FROM {}.logical1_edgydata WHERE cid IN(1,2,3,4,5,6,8,9) ORDER BY cid".format(
                 target_schema
             )
         )
 
-        self.assertEqual(table_one, [])
-        self.assertEqual(table_two, [])
-        self.assertEqual(table_three, [])
-        self.assertEqual(table_four, [])
+        assert table_one == []
+        assert table_two == []
+        assert table_three == []
+        assert table_four == []
 
     def assert_binary_data_is_in_duckdb(
-        self, table_name, should_metadata_columns_exist=False
+        self,
+        target_schema: str,
+        instance: DbSync,
+        table_name: str,
+        should_metadata_columns_exist: bool = False,
     ):
         # Redshift doesn't have binary type. Binary formatted singer values loaded into VARCHAR columns
         # Get loaded rows from tables
-        duckdb = DbSync(self.connection, self.config)
-        target_schema = self.config.get("default_target_schema", "")
-        table_one = duckdb.query(
+        table_one = instance.query(
             'SELECT * FROM {}.{} ORDER BY "new"'.format(target_schema, table_name)
         )
 
@@ -401,344 +362,446 @@ class TestIntegration(unittest.TestCase):
         ]
 
         if should_metadata_columns_exist:
-            assert (
-                self.remove_metadata_columns_from_rows(table_one) == expected_table_one
-            )
+            assert remove_metadata_columns_from_rows(table_one) == expected_table_one
         else:
             assert table_one == expected_table_one
 
-    def test_invalid_json(self):
+    def test_invalid_json(
+        self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+    ):
         """Receiving invalid JSONs should raise an exception"""
         tap_lines = test_utils.get_test_tap_lines("invalid-json.json")
-        with self.assertRaises(json.decoder.JSONDecodeError):
-            target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        with pytest.raises(json.decoder.JSONDecodeError):
+            target_duckdb.persist_lines(connection, config, tap_lines)
 
-    def test_message_order(self):
+    def test_message_order(
+        self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+    ):
         """RECORD message without a previously received SCHEMA message should raise an exception"""
         tap_lines = test_utils.get_test_tap_lines("invalid-message-order.json")
-        with self.assertRaises(Exception):
-            target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        with pytest.raises(Exception):
+            target_duckdb.persist_lines(connection, config, tap_lines)
 
-    def test_loading_tables(self):
+    def test_loading_tables(
+        self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
+    ):
         """Loading multiple tables from the same input tap with various columns types"""
         tap_lines = test_utils.get_test_tap_lines("messages-with-multiple-streams.json")
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        target_duckdb.persist_lines(connection, config, tap_lines)
 
-        self.assert_multiple_streams_are_into_duckdb()
+        self.assert_multiple_streams_are_into_duckdb(
+            target_schema,
+            instance,
+        )
 
-    def test_loading_tables_with_metadata_columns(self):
+    def test_loading_tables_with_metadata_columns(
+        self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
+    ):
         """Loading multiple tables from the same input tap with various columns types"""
         tap_lines = test_utils.get_test_tap_lines("messages-with-multiple-streams.json")
 
         # Turning on adding metadata columns
-        self.config["add_metadata_columns"] = True
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        target_duckdb.persist_lines(
+            connection,
+            {**config, "add_metadata_columns": True},
+            tap_lines,
+        )
 
         # Check if data loaded correctly and metadata columns exist
-        self.assert_multiple_streams_are_into_duckdb(should_metadata_columns_exist=True)
+        self.assert_multiple_streams_are_into_duckdb(
+            target_schema,
+            instance,
+            should_metadata_columns_exist=True,
+        )
 
-    def test_loading_tables_with_defined_parallelism(self):
+    def test_loading_tables_with_defined_parallelism(
+        self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
+    ):
         """Loading multiple tables from the same input tap with various columns types"""
         tap_lines = test_utils.get_test_tap_lines("messages-with-multiple-streams.json")
 
         # Turning on adding metadata columns
-        self.config["parallelism"] = 1
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        target_duckdb.persist_lines(
+            connection,
+            {**config, "parallelism": 1},
+            tap_lines,
+        )
 
-        self.assert_multiple_streams_are_into_duckdb()
+        self.assert_multiple_streams_are_into_duckdb(
+            target_schema,
+            instance,
+        )
 
-    def test_loading_tables_with_hard_delete(self):
+    def test_loading_tables_with_hard_delete(
+        self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
+    ):
         """Loading multiple tables from the same input tap with deleted rows"""
         tap_lines = test_utils.get_test_tap_lines("messages-with-multiple-streams.json")
 
         # Turning on hard delete mode
-        self.config["hard_delete"] = True
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        target_duckdb.persist_lines(
+            connection,
+            {**config, "hard_delete": True},
+            tap_lines,
+        )
 
         # Check if data loaded correctly and metadata columns exist
         self.assert_multiple_streams_are_into_duckdb(
-            should_metadata_columns_exist=True, should_hard_deleted_rows=True
+            target_schema,
+            instance,
+            should_metadata_columns_exist=True,
+            should_hard_deleted_rows=True,
         )
 
-    def test_loading_with_multiple_schema(self):
+    def test_loading_with_multiple_schema(
+        self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
+    ):
         """Loading table with multiple SCHEMA messages"""
         tap_lines = test_utils.get_test_tap_lines("messages-with-multiple-streams.json")
 
         # Load with default settings
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        target_duckdb.persist_lines(connection, config, tap_lines)
 
         # Check if data loaded correctly
         self.assert_multiple_streams_are_into_duckdb(
-            should_metadata_columns_exist=False, should_hard_deleted_rows=False
+            target_schema,
+            instance,
+            should_metadata_columns_exist=False,
+            should_hard_deleted_rows=False,
         )
 
-    def test_loading_table_with_reserved_word_as_name_and_hard_delete(self):
+    def test_loading_table_with_reserved_word_as_name_and_hard_delete(
+        self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
+    ):
         """Loading a table where the name is a reserved word with deleted rows"""
         tap_lines = test_utils.get_test_tap_lines(
             "messages-with-reserved-name-as-table-name.json"
         )
 
         # Turning on hard delete mode
-        self.config["hard_delete"] = True
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        target_duckdb.persist_lines(
+            connection,
+            {**config, "hard_delete": True},
+            tap_lines,
+        )
 
         # Check if data loaded correctly and metadata columns exist
         self.assert_binary_data_is_in_duckdb(
-            table_name='"order"', should_metadata_columns_exist=True
+            target_schema,
+            instance,
+            table_name='"order"',
+            should_metadata_columns_exist=True,
         )
 
-    def test_loading_table_with_space(self):
+    def test_loading_table_with_space(
+        self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
+    ):
         """Loading a table where the name has space"""
         tap_lines = test_utils.get_test_tap_lines(
             "messages-with-space-in-table-name.json"
         )
 
         # Turning on hard delete mode
-        self.config["hard_delete"] = True
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        target_duckdb.persist_lines(
+            connection,
+            {**config, "hard_delete": True},
+            tap_lines,
+        )
 
         # Check if data loaded correctly and metadata columns exist
         self.assert_binary_data_is_in_duckdb(
+            target_schema,
+            instance,
             table_name='"table with space and uppercase"',
             should_metadata_columns_exist=True,
         )
 
-    def test_loading_unicode_characters(self):
+    def test_loading_unicode_characters(
+        self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
+    ):
         """Loading unicode encoded characters"""
         tap_lines = test_utils.get_test_tap_lines(
             "messages-with-unicode-characters.json"
         )
 
         # Load with default settings
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        target_duckdb.persist_lines(connection, config, tap_lines)
 
         # Get loaded rows from tables
-        duckdb = DbSync(self.connection, self.config)
-        target_schema = self.config.get("default_target_schema", "")
-        table_unicode = duckdb.query(
+        table_unicode = instance.query(
             "SELECT * FROM {}.test_table_unicode ORDER BY c_pk".format(target_schema)
         )
 
-        self.assertEqual(
-            self.remove_metadata_columns_from_rows(table_unicode),
-            [
+        def normalize_rows(rows):
+            return [
                 {
-                    "c_int": 1,
-                    "c_pk": 1,
-                    "c_varchar": "Hello world, Καλημέρα κόσμε, コンニチハ",
-                },
-                {
-                    "c_int": 2,
-                    "c_pk": 2,
-                    "c_varchar": "Chinese: 和毛泽东 <<重上井冈山>>. 严永欣, 一九八八年.",
-                },
-                {
-                    "c_int": 3,
-                    "c_pk": 3,
-                    "c_varchar": "Russian: Зарегистрируйтесь сейчас на Десятую Международную Конференцию по",
-                },
-                {
-                    "c_int": 4,
-                    "c_pk": 4,
-                    "c_varchar": "Thai: แผ่นดินฮั่นเสื่อมโทรมแสนสังเวช",
-                },
-                {
-                    "c_int": 5,
-                    "c_pk": 5,
-                    "c_varchar": "Arabic: لقد لعبت أنت وأصدقاؤك لمدة وحصلتم علي من إجمالي النقاط",
-                },
-                {
-                    "c_int": 6,
-                    "c_pk": 6,
-                    "c_varchar": "Special Characters: [\",'!@£$%^&*()]",
-                },
-            ],
-        )
+                    k: unicodedata.normalize("NFC", v) if isinstance(v, str) else v
+                    for k, v in row.items()
+                }
+                for row in rows
+            ]
 
-    def test_loading_long_text(self):
+        assert normalize_rows(remove_metadata_columns_from_rows(table_unicode)) == [
+            {
+                "c_int": 1,
+                "c_pk": 1,
+                "c_varchar": "Hello world, Καλημέρα κόσμε, コンニチハ",
+            },
+            {
+                "c_int": 2,
+                "c_pk": 2,
+                "c_varchar": "Chinese: 和毛泽东 <<重上井冈山>>. 严永欣, 一九八八年.",
+            },
+            {
+                "c_int": 3,
+                "c_pk": 3,
+                "c_varchar": "Russian: Зарегистрируйтесь сейчас на Десятую Международную Конференцию по",
+            },
+            {
+                "c_int": 4,
+                "c_pk": 4,
+                "c_varchar": "Thai: แผ่นดินฮั่นเสื่อมโทรมแสนสังเวช",
+            },
+            {
+                "c_int": 5,
+                "c_pk": 5,
+                "c_varchar": "Arabic: لقد لعبت أنت وأصدقاؤك لمدة وحصلتم علي من إجمالي النقاط",
+            },
+            {
+                "c_int": 6,
+                "c_pk": 6,
+                "c_varchar": "Special Characters: [\",'!@£$%^&*()]",
+            },
+        ]
+
+    def test_loading_long_text(
+        self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
+    ):
         """Loading long texts"""
         tap_lines = test_utils.get_test_tap_lines("messages-with-long-texts.json")
 
         # Load with default settings
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        target_duckdb.persist_lines(connection, config, tap_lines)
 
         # Get loaded rows from tables
-        duckdb = DbSync(self.connection, self.config)
-        target_schema = self.config.get("default_target_schema", "")
-        table_long_texts = duckdb.query(
+        table_long_texts = instance.query(
             "SELECT * FROM {}.test_table_long_texts ORDER BY c_pk".format(target_schema)
         )
 
         # Test not very long texts by exact match
-        self.assertEqual(
-            self.remove_metadata_columns_from_rows(table_long_texts)[:3],
-            [
-                {
-                    "c_int": 1,
-                    "c_pk": 1,
-                    "c_varchar": "Up to 128 characters: Lorem ipsum dolor sit amet, consectetuer adipiscing elit.",
-                },
-                {
-                    "c_int": 2,
-                    "c_pk": 2,
-                    "c_varchar": "Up to 256 characters: Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Aenean commodo ligula eget dolor. Aenean massa. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Donec quam felis, ultricies.",
-                },
-                {
-                    "c_int": 3,
-                    "c_pk": 3,
-                    "c_varchar": "Up to 1024 characters: Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Aenean commodo ligula eget dolor. Aenean massa. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Donec quam felis, ultricies nec, pellentesque eu, pretium quis, sem. Nulla consequat massa quis enim. Donec pede justo, fringilla vel, aliquet nec, vulputate eget, arcu. In enim justo, rhoncus ut, imperdiet a, venenatis vitae, justo. Nullam dictum felis eu pede mollis pretium. Integer tincidunt. Cras dapibus. Vivamus elementum semper nisi. Aenean vulputate eleifend tellus. Aenean leo ligula, porttitor eu, consequat vitae, eleifend ac, enim. Aliquam lorem ante, dapibus in, viverra quis, feugiat a, tellus. Phasellus viverra nulla ut metus varius laoreet. Quisque rutrum. Aenean imperdiet. Etiam ultricies nisi vel augue. Curabitur ullamcorper ultricies nisi. Nam eget dui. Etiam rhoncus. Maecenas tempus, tellus eget condimentum rhoncus, sem quam semper libero, sit amet adipiscing sem neque sed ipsum.",
-                },
-            ],
-        )
+        assert remove_metadata_columns_from_rows(table_long_texts)[:3] == [
+            {
+                "c_int": 1,
+                "c_pk": 1,
+                "c_varchar": "Up to 128 characters: Lorem ipsum dolor sit amet, consectetuer adipiscing elit.",
+            },
+            {
+                "c_int": 2,
+                "c_pk": 2,
+                "c_varchar": "Up to 256 characters: Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Aenean commodo ligula eget dolor. Aenean massa. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Donec quam felis, ultricies.",
+            },
+            {
+                "c_int": 3,
+                "c_pk": 3,
+                "c_varchar": "Up to 1024 characters: Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Aenean commodo ligula eget dolor. Aenean massa. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Donec quam felis, ultricies nec, pellentesque eu, pretium quis, sem. Nulla consequat massa quis enim. Donec pede justo, fringilla vel, aliquet nec, vulputate eget, arcu. In enim justo, rhoncus ut, imperdiet a, venenatis vitae, justo. Nullam dictum felis eu pede mollis pretium. Integer tincidunt. Cras dapibus. Vivamus elementum semper nisi. Aenean vulputate eleifend tellus. Aenean leo ligula, porttitor eu, consequat vitae, eleifend ac, enim. Aliquam lorem ante, dapibus in, viverra quis, feugiat a, tellus. Phasellus viverra nulla ut metus varius laoreet. Quisque rutrum. Aenean imperdiet. Etiam ultricies nisi vel augue. Curabitur ullamcorper ultricies nisi. Nam eget dui. Etiam rhoncus. Maecenas tempus, tellus eget condimentum rhoncus, sem quam semper libero, sit amet adipiscing sem neque sed ipsum.",
+            },
+        ]
 
         # Test very long texts by string length
         record_4k = table_long_texts[3]
         record_32k = table_long_texts[4]
-        self.assertEqual(
-            [
-                {
-                    "c_int": int(record_4k.get("c_int")),
-                    "c_pk": int(record_4k.get("c_pk")),
-                    "len": len(record_4k.get("c_varchar")),
-                },
-                {
-                    "c_int": int(record_32k.get("c_int")),
-                    "c_pk": int(record_32k.get("c_pk")),
-                    "len": len(record_32k.get("c_varchar")),
-                },
-            ],
-            [
-                {"c_int": 4, "c_pk": 4, "len": 4017},
-                {"c_int": 5, "c_pk": 5, "len": 32003},
-            ],
-        )
+        assert [
+            {
+                "c_int": int(record_4k.get("c_int")),
+                "c_pk": int(record_4k.get("c_pk")),
+                "len": len(record_4k.get("c_varchar")),
+            },
+            {
+                "c_int": int(record_32k.get("c_int")),
+                "c_pk": int(record_32k.get("c_pk")),
+                "len": len(record_32k.get("c_varchar")),
+            },
+        ] == [
+            {"c_int": 4, "c_pk": 4, "len": 4017},
+            {"c_int": 5, "c_pk": 5, "len": 32003},
+        ]
 
-    def test_non_db_friendly_columns(self):
+    def test_non_db_friendly_columns(
+        self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
+    ):
         """Loading non-db friendly columns like, camelcase, minus signs, etc."""
         tap_lines = test_utils.get_test_tap_lines(
             "messages-with-non-db-friendly-columns.json"
         )
 
         # Load with default settings
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        target_duckdb.persist_lines(connection, config, tap_lines)
 
         # Get loaded rows from tables
-        duckdb = DbSync(self.connection, self.config)
-        target_schema = self.config.get("default_target_schema", "")
-        table_non_db_friendly_columns = duckdb.query(
+        table_non_db_friendly_columns = instance.query(
             "SELECT * FROM {}.test_table_non_db_friendly_columns ORDER BY c_pk".format(
                 target_schema
             )
         )
 
-        self.assertEqual(
-            self.remove_metadata_columns_from_rows(table_non_db_friendly_columns),
-            [
-                {
-                    "c_pk": 1,
-                    "camelcasecolumn": "Dummy row 1",
-                    "minus-column": "Dummy row 1",
-                },
-                {
-                    "c_pk": 2,
-                    "camelcasecolumn": "Dummy row 2",
-                    "minus-column": "Dummy row 2",
-                },
-                {
-                    "c_pk": 3,
-                    "camelcasecolumn": "Dummy row 3",
-                    "minus-column": "Dummy row 3",
-                },
-                {
-                    "c_pk": 4,
-                    "camelcasecolumn": "Dummy row 4",
-                    "minus-column": "Dummy row 4",
-                },
-                {
-                    "c_pk": 5,
-                    "camelcasecolumn": "Dummy row 5",
-                    "minus-column": "Dummy row 5",
-                },
-            ],
-        )
+        assert remove_metadata_columns_from_rows(table_non_db_friendly_columns) == [
+            {
+                "c_pk": 1,
+                "camelcasecolumn": "Dummy row 1",
+                "minus-column": "Dummy row 1",
+            },
+            {
+                "c_pk": 2,
+                "camelcasecolumn": "Dummy row 2",
+                "minus-column": "Dummy row 2",
+            },
+            {
+                "c_pk": 3,
+                "camelcasecolumn": "Dummy row 3",
+                "minus-column": "Dummy row 3",
+            },
+            {
+                "c_pk": 4,
+                "camelcasecolumn": "Dummy row 4",
+                "minus-column": "Dummy row 4",
+            },
+            {
+                "c_pk": 5,
+                "camelcasecolumn": "Dummy row 5",
+                "minus-column": "Dummy row 5",
+            },
+        ]
 
-    def test_nested_schema_unflattening(self):
+    def test_nested_schema_unflattening(
+        self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
+    ):
         """Loading nested JSON objects into JSON columns without flattening"""
         tap_lines = test_utils.get_test_tap_lines("messages-with-nested-schema.json")
 
         # Load with default settings - Flattening disabled
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        target_duckdb.persist_lines(connection, config, tap_lines)
 
         # Get loaded rows from tables - Transform JSON to string at query time
-        duckdb = DbSync(self.connection, self.config)
-        target_schema = self.config.get("default_target_schema", "")
-        unflattened_table = duckdb.query(
+        unflattened_table = instance.query(
             """SELECT * FROM {}.test_table_nested_schema ORDER BY c_pk""".format(
                 target_schema
             )
         )
 
         # Should be valid nested JSON strings
-        self.assertEqual(
-            self.remove_metadata_columns_from_rows(unflattened_table),
-            [
-                {
-                    "c_pk": 1,
-                    "c_array": json.dumps([1, 2, 3]),
-                    "c_object": json.dumps({"key_1": "value_1"}),
-                    "c_object_with_props": json.dumps({"key_1": "value_1"}),
-                    "c_nested_object": json.dumps(
-                        {
-                            "nested_prop_1": "nested_value_1",
-                            "nested_prop_2": "nested_value_2",
-                            "nested_prop_3": {
-                                "multi_nested_prop_1": "multi_value_1",
-                                "multi_nested_prop_2": "multi_value_2",
-                            },
-                        }
-                    ),
-                }
-            ],
-        )
+        assert remove_metadata_columns_from_rows(unflattened_table) == [
+            {
+                "c_pk": 1,
+                "c_array": json.dumps([1, 2, 3]),
+                "c_object": json.dumps({"key_1": "value_1"}),
+                "c_object_with_props": json.dumps({"key_1": "value_1"}),
+                "c_nested_object": json.dumps(
+                    {
+                        "nested_prop_1": "nested_value_1",
+                        "nested_prop_2": "nested_value_2",
+                        "nested_prop_3": {
+                            "multi_nested_prop_1": "multi_value_1",
+                            "multi_nested_prop_2": "multi_value_2",
+                        },
+                    }
+                ),
+            }
+        ]
 
-    def test_nested_schema_flattening(self):
+    def test_nested_schema_flattening(
+        self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
+    ):
         """Loading nested JSON objects with flattening and not not flattening"""
         tap_lines = test_utils.get_test_tap_lines("messages-with-nested-schema.json")
 
-        # Turning on data flattening
-        self.config["data_flattening_max_level"] = 10
-
-        # Load with default settings - Flattening enabled
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        # Load with flattening enabled
+        target_duckdb.persist_lines(
+            connection,
+            {**config, "data_flattening_max_level": 10},
+            tap_lines,
+        )
 
         # Get loaded rows from tables
-        duckdb = DbSync(self.connection, self.config)
-        target_schema = self.config.get("default_target_schema", "")
-        flattened_table = duckdb.query(
+        flattened_table = instance.query(
             "SELECT * FROM {}.test_table_nested_schema ORDER BY c_pk".format(
                 target_schema
             )
         )
 
         # Should be flattened columns
-        self.assertEqual(
-            self.remove_metadata_columns_from_rows(flattened_table),
-            [
-                {
-                    "c_pk": 1,
-                    "c_array": json.dumps([1, 2, 3]),
-                    "c_object": None,
-                    # Cannot map RECORD to SCHEMA. SCHEMA doesn't have properties that requires for flattening
-                    "c_object_with_props__key_1": "value_1",
-                    "c_nested_object__nested_prop_1": "nested_value_1",
-                    "c_nested_object__nested_prop_2": "nested_value_2",
-                    "c_nested_object__nested_prop_3__multi_nested_prop_1": "multi_value_1",
-                    "c_nested_object__nested_prop_3__multi_nested_prop_2": "multi_value_2",
-                }
-            ],
-        )
+        assert remove_metadata_columns_from_rows(flattened_table) == [
+            {
+                "c_pk": 1,
+                "c_array": json.dumps([1, 2, 3]),
+                "c_object": None,
+                # Cannot map RECORD to SCHEMA. SCHEMA doesn't have properties that requires for flattening
+                "c_object_with_props__key_1": "value_1",
+                "c_nested_object__nested_prop_1": "nested_value_1",
+                "c_nested_object__nested_prop_2": "nested_value_2",
+                "c_nested_object__nested_prop_3__multi_nested_prop_1": "multi_value_1",
+                "c_nested_object__nested_prop_3__multi_nested_prop_2": "multi_value_2",
+            }
+        ]
 
-    def test_column_name_change(self):
+    def test_column_name_change(
+        self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
+    ):
         """Tests correct renaming of duckdb columns after source change"""
         tap_lines_before_column_name_change = test_utils.get_test_tap_lines(
             "messages-with-multiple-streams.json"
@@ -749,119 +812,112 @@ class TestIntegration(unittest.TestCase):
 
         # Load with default settings
         target_duckdb.persist_lines(
-            self.connection, self.config, tap_lines_before_column_name_change
+            connection, config, tap_lines_before_column_name_change
         )
         target_duckdb.persist_lines(
-            self.connection, self.config, tap_lines_after_column_name_change
+            connection, config, tap_lines_after_column_name_change
         )
 
         # Get loaded rows from tables
-        duckdb = DbSync(self.connection, self.config)
-        target_schema = self.config.get("default_target_schema", "")
-        table_one = duckdb.query(
+        table_one = instance.query(
             "SELECT * FROM {}.test_table_one ORDER BY c_pk".format(target_schema)
         )
-        table_two = duckdb.query(
+        table_two = instance.query(
             "SELECT * FROM {}.test_table_two ORDER BY c_pk".format(target_schema)
         )
-        table_three = duckdb.query(
+        table_three = instance.query(
             "SELECT * FROM {}.test_table_three ORDER BY c_pk".format(target_schema)
         )
 
         # Get the previous column name from information schema in test_table_two
-        previous_column_name = duckdb.query(
+        previous_column_name = instance.query(
             """
             SELECT column_name
               FROM information_schema.columns
               WHERE table_schema = '{}'
                AND table_name = 'test_table_two'
                AND ordinal_position = 1
-            """.format(
-                target_schema.lower()
-            )
+            """.format(target_schema.lower())
         )[0]["column_name"]
 
         # Table one should have no changes
-        self.assertEqual(
-            self.remove_metadata_columns_from_rows(table_one),
-            [{"c_int": 1, "c_pk": 1, "c_varchar": "1"}],
-        )
+        assert remove_metadata_columns_from_rows(table_one) == [
+            {"c_int": 1, "c_pk": 1, "c_varchar": "1"},
+        ]
 
         # Table two should have versioned column
-        self.assertEqual(
-            self.remove_metadata_columns_from_rows(table_two),
-            [
-                {
-                    previous_column_name: datetime.datetime(2019, 2, 1, 15, 12, 45),
-                    "c_int": 1,
-                    "c_pk": 1,
-                    "c_varchar": "1",
-                    "c_date": None,
-                },
-                {
-                    previous_column_name: datetime.datetime(2019, 2, 10, 2),
-                    "c_int": 2,
-                    "c_pk": 2,
-                    "c_varchar": "2",
-                    "c_date": "2019-02-12 02:00:00",
-                },
-                {
-                    previous_column_name: None,
-                    "c_int": 3,
-                    "c_pk": 3,
-                    "c_varchar": "2",
-                    "c_date": "2019-02-15 02:00:00",
-                },
-            ],
-        )
+        assert remove_metadata_columns_from_rows(table_two) == [
+            {
+                previous_column_name: datetime.datetime(2019, 2, 1, 15, 12, 45),
+                "c_int": 1,
+                "c_pk": 1,
+                "c_varchar": "1",
+                "c_date": None,
+            },
+            {
+                previous_column_name: datetime.datetime(2019, 2, 10, 2),
+                "c_int": 2,
+                "c_pk": 2,
+                "c_varchar": "2",
+                "c_date": "2019-02-12 02:00:00",
+            },
+            {
+                previous_column_name: None,
+                "c_int": 3,
+                "c_pk": 3,
+                "c_varchar": "2",
+                "c_date": "2019-02-15 02:00:00",
+            },
+        ]
 
         # Table three should have renamed columns
-        self.assertEqual(
-            self.remove_metadata_columns_from_rows(table_three),
-            [
-                {
-                    "c_int": 1,
-                    "c_pk": 1,
-                    "c_time": datetime.time(4, 0),
-                    "c_varchar": "1",
-                    "c_time_renamed": None,
-                },
-                {
-                    "c_int": 2,
-                    "c_pk": 2,
-                    "c_time": datetime.time(7, 15),
-                    "c_varchar": "2",
-                    "c_time_renamed": None,
-                },
-                {
-                    "c_int": 3,
-                    "c_pk": 3,
-                    "c_time": datetime.time(23, 0, 3),
-                    "c_varchar": "3",
-                    "c_time_renamed": datetime.time(8, 15),
-                },
-                {
-                    "c_int": 4,
-                    "c_pk": 4,
-                    "c_time": None,
-                    "c_varchar": "4",
-                    "c_time_renamed": datetime.time(23, 0, 3),
-                },
-            ],
-        )
+        assert remove_metadata_columns_from_rows(table_three) == [
+            {
+                "c_int": 1,
+                "c_pk": 1,
+                "c_time": datetime.time(4, 0),
+                "c_varchar": "1",
+                "c_time_renamed": None,
+            },
+            {
+                "c_int": 2,
+                "c_pk": 2,
+                "c_time": datetime.time(7, 15),
+                "c_varchar": "2",
+                "c_time_renamed": None,
+            },
+            {
+                "c_int": 3,
+                "c_pk": 3,
+                "c_time": datetime.time(23, 0, 3),
+                "c_varchar": "3",
+                "c_time_renamed": datetime.time(8, 15),
+            },
+            {
+                "c_int": 4,
+                "c_pk": 4,
+                "c_time": None,
+                "c_varchar": "4",
+                "c_time_renamed": datetime.time(23, 0, 3),
+            },
+        ]
 
-    def test_schema_mapping(self):
+    def test_schema_mapping(
+        self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
+    ):
         """Load stream into a specific schema, create indices and grant permissions"""
         tap_lines = test_utils.get_test_tap_lines("messages-with-multiple-streams.json")
 
-        # Turning on hard delete mode
-        self.config["hard_delete"] = True
-
-        # Remove the default_target_schema and use schema mapping
-        del self.config["default_target_schema"]
-
-        # ... and define a custom stream to schema mapping
-        self.config["schema_mapping"] = {
+        # Use schema mapping with hard delete instead of default_target_schema
+        schema_mapping_config = {
+            k: v for k, v in config.items() if k != "default_target_schema"
+        }
+        schema_mapping_config["hard_delete"] = True
+        schema_mapping_config["schema_mapping"] = {
             "tap_mysql_test": {
                 "target_schema": "integration_test_schema",
                 "indices": {
@@ -870,40 +926,60 @@ class TestIntegration(unittest.TestCase):
                 },
             }
         }
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        target_duckdb.persist_lines(connection, schema_mapping_config, tap_lines)
 
         # Check if data loaded correctly and metadata columns exist
         self.assert_multiple_streams_are_into_duckdb(
-            should_metadata_columns_exist=True, should_hard_deleted_rows=True
+            target_schema,
+            instance,
+            should_metadata_columns_exist=True,
+            should_hard_deleted_rows=True,
         )
 
     def test_logical_streams_from_pg_with_hard_delete_and_default_batch_size_should_pass(
         self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
     ):
         """Tests logical streams from pg with inserts, updates and deletes"""
         tap_lines = test_utils.get_test_tap_lines("messages-pg-logical-streams.json")
 
         # Turning on hard delete mode
-        self.config["hard_delete"] = True
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        target_duckdb.persist_lines(
+            connection,
+            {**config, "hard_delete": True},
+            tap_lines,
+        )
 
-        self.assert_logical_streams_are_in_duckdb(True)
+        self.assert_logical_streams_are_in_duckdb(target_schema, instance, True)
 
     def test_logical_streams_from_pg_with_hard_delete_and_batch_size_of_5_should_pass(
         self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
     ):
         """Tests logical streams from pg with inserts, updates and deletes"""
         tap_lines = test_utils.get_test_tap_lines("messages-pg-logical-streams.json")
 
         # Turning on hard delete mode
-        self.config["hard_delete"] = True
-        self.config["batch_size_rows"] = 5
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        target_duckdb.persist_lines(
+            connection,
+            {**config, "hard_delete": True, "batch_size_rows": 5},
+            tap_lines,
+        )
 
-        self.assert_logical_streams_are_in_duckdb(True)
+        self.assert_logical_streams_are_in_duckdb(target_schema, instance, True)
 
     def test_logical_streams_from_pg_with_hard_delete_and_batch_size_of_5_and_no_records_should_pass(
         self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
     ):
         """Tests logical streams from pg with inserts, updates and deletes"""
         tap_lines = test_utils.get_test_tap_lines(
@@ -911,707 +987,749 @@ class TestIntegration(unittest.TestCase):
         )
 
         # Turning on hard delete mode
-        self.config["hard_delete"] = True
-        self.config["batch_size_rows"] = 5
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        target_duckdb.persist_lines(
+            connection,
+            {**config, "hard_delete": True, "batch_size_rows": 5},
+            tap_lines,
+        )
 
-        self.assert_logical_streams_are_in_duckdb_and_are_empty()
+        self.assert_logical_streams_are_in_duckdb_and_are_empty(target_schema, instance)
 
     @mock.patch("target_duckdb.emit_state")
-    def test_flush_streams_with_no_intermediate_flushes(self, mock_emit_state):
+    def test_flush_streams_with_no_intermediate_flushes(
+        self,
+        mock_emit_state,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
+    ):
         """Test emitting states when no intermediate flush required"""
         mock_emit_state.get.return_value = None
         tap_lines = test_utils.get_test_tap_lines("messages-pg-logical-streams.json")
 
         # Set batch size big enough to never has to flush in the middle
-        self.config["hard_delete"] = True
-        self.config["batch_size_rows"] = 1000
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
-
-        # State should be emitted only once with the latest received STATE message
-        self.assertEqual(
-            mock_emit_state.mock_calls,
-            [
-                mock.call(
-                    {
-                        "currently_syncing": None,
-                        "bookmarks": {
-                            "logical1-logical1_edgydata": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108240872,
-                                "version": 1570922723596,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108240872,
-                                "version": 1570922723618,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table2": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108240872,
-                                "version": 1570922723635,
-                                "xmin": None,
-                            },
-                            "logical2-logical2_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108240872,
-                                "version": 1570922723651,
-                                "xmin": None,
-                            },
-                            "public-city": {
-                                "last_replication_method": "INCREMENTAL",
-                                "replication_key": "id",
-                                "version": 1570922723667,
-                                "replication_key_value": 4079,
-                            },
-                            "public-country": {
-                                "last_replication_method": "FULL_TABLE",
-                                "version": 1570922730456,
-                                "xmin": None,
-                            },
-                            "public2-wearehere": {},
-                        },
-                    }
-                )
-            ],
+        target_duckdb.persist_lines(
+            connection,
+            {**config, "hard_delete": True, "batch_size_rows": 1000},
+            tap_lines,
         )
 
+        # State should be emitted only once with the latest received STATE message
+        assert mock_emit_state.mock_calls == [
+            mock.call(
+                {
+                    "currently_syncing": None,
+                    "bookmarks": {
+                        "logical1-logical1_edgydata": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108240872,
+                            "version": 1570922723596,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108240872,
+                            "version": 1570922723618,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table2": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108240872,
+                            "version": 1570922723635,
+                            "xmin": None,
+                        },
+                        "logical2-logical2_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108240872,
+                            "version": 1570922723651,
+                            "xmin": None,
+                        },
+                        "public-city": {
+                            "last_replication_method": "INCREMENTAL",
+                            "replication_key": "id",
+                            "version": 1570922723667,
+                            "replication_key_value": 4079,
+                        },
+                        "public-country": {
+                            "last_replication_method": "FULL_TABLE",
+                            "version": 1570922730456,
+                            "xmin": None,
+                        },
+                        "public2-wearehere": {},
+                    },
+                }
+            )
+        ]
+
         # Every table should be loaded correctly
-        self.assert_logical_streams_are_in_duckdb(True)
+        self.assert_logical_streams_are_in_duckdb(target_schema, instance, True)
 
     @mock.patch("target_duckdb.emit_state")
-    def test_flush_streams_with_intermediate_flushes(self, mock_emit_state):
+    def test_flush_streams_with_intermediate_flushes(
+        self,
+        mock_emit_state,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
+    ):
         """Test emitting states when intermediate flushes required"""
         mock_emit_state.get.return_value = None
         tap_lines = test_utils.get_test_tap_lines("messages-pg-logical-streams.json")
 
         # Set batch size small enough to trigger multiple stream flushes
-        self.config["hard_delete"] = True
-        self.config["batch_size_rows"] = 10
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
-
-        # State should be emitted multiple times, updating the positions only in the stream which got flushed
-        self.assertEqual(
-            mock_emit_state.call_args_list,
-            [
-                # Flush #1 - Flushed edgydata until lsn: 108197216
-                mock.call(
-                    {
-                        "currently_syncing": None,
-                        "bookmarks": {
-                            "logical1-logical1_edgydata": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108197216,
-                                "version": 1570922723596,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108196176,
-                                "version": 1570922723618,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table2": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108196176,
-                                "version": 1570922723635,
-                                "xmin": None,
-                            },
-                            "logical2-logical2_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108196176,
-                                "version": 1570922723651,
-                                "xmin": None,
-                            },
-                            "public-city": {
-                                "last_replication_method": "INCREMENTAL",
-                                "replication_key": "id",
-                                "version": 1570922723667,
-                                "replication_key_value": 4079,
-                            },
-                            "public-country": {
-                                "last_replication_method": "FULL_TABLE",
-                                "version": 1570922730456,
-                                "xmin": None,
-                            },
-                            "public2-wearehere": {},
-                        },
-                    }
-                ),
-                # Flush #2 - Flushed logical1-logical1_table2 until lsn: 108201336
-                mock.call(
-                    {
-                        "currently_syncing": None,
-                        "bookmarks": {
-                            "logical1-logical1_edgydata": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108197216,
-                                "version": 1570922723596,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108196176,
-                                "version": 1570922723618,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table2": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108201336,
-                                "version": 1570922723635,
-                                "xmin": None,
-                            },
-                            "logical2-logical2_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108196176,
-                                "version": 1570922723651,
-                                "xmin": None,
-                            },
-                            "public-city": {
-                                "last_replication_method": "INCREMENTAL",
-                                "replication_key": "id",
-                                "version": 1570922723667,
-                                "replication_key_value": 4079,
-                            },
-                            "public-country": {
-                                "last_replication_method": "FULL_TABLE",
-                                "version": 1570922730456,
-                                "xmin": None,
-                            },
-                            "public2-wearehere": {},
-                        },
-                    }
-                ),
-                # Flush #3 - Flushed logical1-logical1_table2 until lsn: 108237600
-                mock.call(
-                    {
-                        "currently_syncing": None,
-                        "bookmarks": {
-                            "logical1-logical1_edgydata": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108197216,
-                                "version": 1570922723596,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108196176,
-                                "version": 1570922723618,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table2": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108237600,
-                                "version": 1570922723635,
-                                "xmin": None,
-                            },
-                            "logical2-logical2_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108196176,
-                                "version": 1570922723651,
-                                "xmin": None,
-                            },
-                            "public-city": {
-                                "last_replication_method": "INCREMENTAL",
-                                "replication_key": "id",
-                                "version": 1570922723667,
-                                "replication_key_value": 4079,
-                            },
-                            "public-country": {
-                                "last_replication_method": "FULL_TABLE",
-                                "version": 1570922730456,
-                                "xmin": None,
-                            },
-                            "public2-wearehere": {},
-                        },
-                    }
-                ),
-                # Flush #4 - Flushed logical1-logical1_table2 until lsn: 108238768
-                mock.call(
-                    {
-                        "currently_syncing": None,
-                        "bookmarks": {
-                            "logical1-logical1_edgydata": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108197216,
-                                "version": 1570922723596,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108196176,
-                                "version": 1570922723618,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table2": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108238768,
-                                "version": 1570922723635,
-                                "xmin": None,
-                            },
-                            "logical2-logical2_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108196176,
-                                "version": 1570922723651,
-                                "xmin": None,
-                            },
-                            "public-city": {
-                                "last_replication_method": "INCREMENTAL",
-                                "replication_key": "id",
-                                "version": 1570922723667,
-                                "replication_key_value": 4079,
-                            },
-                            "public-country": {
-                                "last_replication_method": "FULL_TABLE",
-                                "version": 1570922730456,
-                                "xmin": None,
-                            },
-                            "public2-wearehere": {},
-                        },
-                    }
-                ),
-                # Flush #5 - Flushed logical1-logical1_table2 until lsn: 108239704,
-                mock.call(
-                    {
-                        "currently_syncing": None,
-                        "bookmarks": {
-                            "logical1-logical1_edgydata": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108197216,
-                                "version": 1570922723596,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108196176,
-                                "version": 1570922723618,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table2": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108239896,
-                                "version": 1570922723635,
-                                "xmin": None,
-                            },
-                            "logical2-logical2_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108196176,
-                                "version": 1570922723651,
-                                "xmin": None,
-                            },
-                            "public-city": {
-                                "last_replication_method": "INCREMENTAL",
-                                "replication_key": "id",
-                                "version": 1570922723667,
-                                "replication_key_value": 4079,
-                            },
-                            "public-country": {
-                                "last_replication_method": "FULL_TABLE",
-                                "version": 1570922730456,
-                                "xmin": None,
-                            },
-                            "public2-wearehere": {},
-                        },
-                    }
-                ),
-                # Flush #6 - Last flush, update every stream lsn: 108240872,
-                mock.call(
-                    {
-                        "currently_syncing": None,
-                        "bookmarks": {
-                            "logical1-logical1_edgydata": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108240872,
-                                "version": 1570922723596,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108240872,
-                                "version": 1570922723618,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table2": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108240872,
-                                "version": 1570922723635,
-                                "xmin": None,
-                            },
-                            "logical2-logical2_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108240872,
-                                "version": 1570922723651,
-                                "xmin": None,
-                            },
-                            "public-city": {
-                                "last_replication_method": "INCREMENTAL",
-                                "replication_key": "id",
-                                "version": 1570922723667,
-                                "replication_key_value": 4079,
-                            },
-                            "public-country": {
-                                "last_replication_method": "FULL_TABLE",
-                                "version": 1570922730456,
-                                "xmin": None,
-                            },
-                            "public2-wearehere": {},
-                        },
-                    }
-                ),
-            ],
+        target_duckdb.persist_lines(
+            connection,
+            {**config, "hard_delete": True, "batch_size_rows": 10},
+            tap_lines,
         )
 
+        # State should be emitted multiple times, updating the positions only in the stream which got flushed
+        assert mock_emit_state.call_args_list == [
+            # Flush #1 - Flushed edgydata until lsn: 108197216
+            mock.call(
+                {
+                    "currently_syncing": None,
+                    "bookmarks": {
+                        "logical1-logical1_edgydata": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108197216,
+                            "version": 1570922723596,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108196176,
+                            "version": 1570922723618,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table2": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108196176,
+                            "version": 1570922723635,
+                            "xmin": None,
+                        },
+                        "logical2-logical2_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108196176,
+                            "version": 1570922723651,
+                            "xmin": None,
+                        },
+                        "public-city": {
+                            "last_replication_method": "INCREMENTAL",
+                            "replication_key": "id",
+                            "version": 1570922723667,
+                            "replication_key_value": 4079,
+                        },
+                        "public-country": {
+                            "last_replication_method": "FULL_TABLE",
+                            "version": 1570922730456,
+                            "xmin": None,
+                        },
+                        "public2-wearehere": {},
+                    },
+                }
+            ),
+            # Flush #2 - Flushed logical1-logical1_table2 until lsn: 108201336
+            mock.call(
+                {
+                    "currently_syncing": None,
+                    "bookmarks": {
+                        "logical1-logical1_edgydata": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108197216,
+                            "version": 1570922723596,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108196176,
+                            "version": 1570922723618,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table2": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108201336,
+                            "version": 1570922723635,
+                            "xmin": None,
+                        },
+                        "logical2-logical2_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108196176,
+                            "version": 1570922723651,
+                            "xmin": None,
+                        },
+                        "public-city": {
+                            "last_replication_method": "INCREMENTAL",
+                            "replication_key": "id",
+                            "version": 1570922723667,
+                            "replication_key_value": 4079,
+                        },
+                        "public-country": {
+                            "last_replication_method": "FULL_TABLE",
+                            "version": 1570922730456,
+                            "xmin": None,
+                        },
+                        "public2-wearehere": {},
+                    },
+                }
+            ),
+            # Flush #3 - Flushed logical1-logical1_table2 until lsn: 108237600
+            mock.call(
+                {
+                    "currently_syncing": None,
+                    "bookmarks": {
+                        "logical1-logical1_edgydata": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108197216,
+                            "version": 1570922723596,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108196176,
+                            "version": 1570922723618,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table2": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108237600,
+                            "version": 1570922723635,
+                            "xmin": None,
+                        },
+                        "logical2-logical2_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108196176,
+                            "version": 1570922723651,
+                            "xmin": None,
+                        },
+                        "public-city": {
+                            "last_replication_method": "INCREMENTAL",
+                            "replication_key": "id",
+                            "version": 1570922723667,
+                            "replication_key_value": 4079,
+                        },
+                        "public-country": {
+                            "last_replication_method": "FULL_TABLE",
+                            "version": 1570922730456,
+                            "xmin": None,
+                        },
+                        "public2-wearehere": {},
+                    },
+                }
+            ),
+            # Flush #4 - Flushed logical1-logical1_table2 until lsn: 108238768
+            mock.call(
+                {
+                    "currently_syncing": None,
+                    "bookmarks": {
+                        "logical1-logical1_edgydata": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108197216,
+                            "version": 1570922723596,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108196176,
+                            "version": 1570922723618,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table2": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108238768,
+                            "version": 1570922723635,
+                            "xmin": None,
+                        },
+                        "logical2-logical2_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108196176,
+                            "version": 1570922723651,
+                            "xmin": None,
+                        },
+                        "public-city": {
+                            "last_replication_method": "INCREMENTAL",
+                            "replication_key": "id",
+                            "version": 1570922723667,
+                            "replication_key_value": 4079,
+                        },
+                        "public-country": {
+                            "last_replication_method": "FULL_TABLE",
+                            "version": 1570922730456,
+                            "xmin": None,
+                        },
+                        "public2-wearehere": {},
+                    },
+                }
+            ),
+            # Flush #5 - Flushed logical1-logical1_table2 until lsn: 108239704,
+            mock.call(
+                {
+                    "currently_syncing": None,
+                    "bookmarks": {
+                        "logical1-logical1_edgydata": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108197216,
+                            "version": 1570922723596,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108196176,
+                            "version": 1570922723618,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table2": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108239896,
+                            "version": 1570922723635,
+                            "xmin": None,
+                        },
+                        "logical2-logical2_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108196176,
+                            "version": 1570922723651,
+                            "xmin": None,
+                        },
+                        "public-city": {
+                            "last_replication_method": "INCREMENTAL",
+                            "replication_key": "id",
+                            "version": 1570922723667,
+                            "replication_key_value": 4079,
+                        },
+                        "public-country": {
+                            "last_replication_method": "FULL_TABLE",
+                            "version": 1570922730456,
+                            "xmin": None,
+                        },
+                        "public2-wearehere": {},
+                    },
+                }
+            ),
+            # Flush #6 - Last flush, update every stream lsn: 108240872,
+            mock.call(
+                {
+                    "currently_syncing": None,
+                    "bookmarks": {
+                        "logical1-logical1_edgydata": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108240872,
+                            "version": 1570922723596,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108240872,
+                            "version": 1570922723618,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table2": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108240872,
+                            "version": 1570922723635,
+                            "xmin": None,
+                        },
+                        "logical2-logical2_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108240872,
+                            "version": 1570922723651,
+                            "xmin": None,
+                        },
+                        "public-city": {
+                            "last_replication_method": "INCREMENTAL",
+                            "replication_key": "id",
+                            "version": 1570922723667,
+                            "replication_key_value": 4079,
+                        },
+                        "public-country": {
+                            "last_replication_method": "FULL_TABLE",
+                            "version": 1570922730456,
+                            "xmin": None,
+                        },
+                        "public2-wearehere": {},
+                    },
+                }
+            ),
+        ]
+
         # Every table should be loaded correctly
-        self.assert_logical_streams_are_in_duckdb(True)
+        self.assert_logical_streams_are_in_duckdb(target_schema, instance, True)
 
     @mock.patch("target_duckdb.emit_state")
     def test_flush_streams_with_intermediate_flushes_on_all_streams(
-        self, mock_emit_state
+        self,
+        mock_emit_state,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
     ):
         """Test emitting states when intermediate flushes required and flush_all_streams is enabled"""
         mock_emit_state.get.return_value = None
         tap_lines = test_utils.get_test_tap_lines("messages-pg-logical-streams.json")
 
         # Set batch size small enough to trigger multiple stream flushes
-        self.config["hard_delete"] = True
-        self.config["batch_size_rows"] = 10
-        self.config["flush_all_streams"] = True
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
-
-        # State should be emitted 6 times, flushing every stream and updating every stream position
-        self.assertEqual(
-            mock_emit_state.call_args_list,
-            [
-                # Flush #1 - Flush every stream until lsn: 108197216
-                mock.call(
-                    {
-                        "currently_syncing": None,
-                        "bookmarks": {
-                            "logical1-logical1_edgydata": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108197216,
-                                "version": 1570922723596,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108197216,
-                                "version": 1570922723618,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table2": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108197216,
-                                "version": 1570922723635,
-                                "xmin": None,
-                            },
-                            "logical2-logical2_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108197216,
-                                "version": 1570922723651,
-                                "xmin": None,
-                            },
-                            "public-city": {
-                                "last_replication_method": "INCREMENTAL",
-                                "replication_key": "id",
-                                "version": 1570922723667,
-                                "replication_key_value": 4079,
-                            },
-                            "public-country": {
-                                "last_replication_method": "FULL_TABLE",
-                                "version": 1570922730456,
-                                "xmin": None,
-                            },
-                            "public2-wearehere": {},
-                        },
-                    }
-                ),
-                # Flush #2 - Flush every stream until lsn 108201336
-                mock.call(
-                    {
-                        "currently_syncing": None,
-                        "bookmarks": {
-                            "logical1-logical1_edgydata": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108201336,
-                                "version": 1570922723596,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108201336,
-                                "version": 1570922723618,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table2": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108201336,
-                                "version": 1570922723635,
-                                "xmin": None,
-                            },
-                            "logical2-logical2_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108201336,
-                                "version": 1570922723651,
-                                "xmin": None,
-                            },
-                            "public-city": {
-                                "last_replication_method": "INCREMENTAL",
-                                "replication_key": "id",
-                                "version": 1570922723667,
-                                "replication_key_value": 4079,
-                            },
-                            "public-country": {
-                                "last_replication_method": "FULL_TABLE",
-                                "version": 1570922730456,
-                                "xmin": None,
-                            },
-                            "public2-wearehere": {},
-                        },
-                    }
-                ),
-                # Flush #3 - Flush every stream until lsn: 108237600
-                mock.call(
-                    {
-                        "currently_syncing": None,
-                        "bookmarks": {
-                            "logical1-logical1_edgydata": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108237600,
-                                "version": 1570922723596,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108237600,
-                                "version": 1570922723618,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table2": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108237600,
-                                "version": 1570922723635,
-                                "xmin": None,
-                            },
-                            "logical2-logical2_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108237600,
-                                "version": 1570922723651,
-                                "xmin": None,
-                            },
-                            "public-city": {
-                                "last_replication_method": "INCREMENTAL",
-                                "replication_key": "id",
-                                "version": 1570922723667,
-                                "replication_key_value": 4079,
-                            },
-                            "public-country": {
-                                "last_replication_method": "FULL_TABLE",
-                                "version": 1570922730456,
-                                "xmin": None,
-                            },
-                            "public2-wearehere": {},
-                        },
-                    }
-                ),
-                # Flush #4 - Flush every stream until lsn: 108238768
-                mock.call(
-                    {
-                        "currently_syncing": None,
-                        "bookmarks": {
-                            "logical1-logical1_edgydata": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108238768,
-                                "version": 1570922723596,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108238768,
-                                "version": 1570922723618,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table2": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108238768,
-                                "version": 1570922723635,
-                                "xmin": None,
-                            },
-                            "logical2-logical2_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108238768,
-                                "version": 1570922723651,
-                                "xmin": None,
-                            },
-                            "public-city": {
-                                "last_replication_method": "INCREMENTAL",
-                                "replication_key": "id",
-                                "version": 1570922723667,
-                                "replication_key_value": 4079,
-                            },
-                            "public-country": {
-                                "last_replication_method": "FULL_TABLE",
-                                "version": 1570922730456,
-                                "xmin": None,
-                            },
-                            "public2-wearehere": {},
-                        },
-                    }
-                ),
-                # Flush #5 - Flush every stream until lsn: 108239704,
-                mock.call(
-                    {
-                        "currently_syncing": None,
-                        "bookmarks": {
-                            "logical1-logical1_edgydata": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108239896,
-                                "version": 1570922723596,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108239896,
-                                "version": 1570922723618,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table2": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108239896,
-                                "version": 1570922723635,
-                                "xmin": None,
-                            },
-                            "logical2-logical2_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108239896,
-                                "version": 1570922723651,
-                                "xmin": None,
-                            },
-                            "public-city": {
-                                "last_replication_method": "INCREMENTAL",
-                                "replication_key": "id",
-                                "version": 1570922723667,
-                                "replication_key_value": 4079,
-                            },
-                            "public-country": {
-                                "last_replication_method": "FULL_TABLE",
-                                "version": 1570922730456,
-                                "xmin": None,
-                            },
-                            "public2-wearehere": {},
-                        },
-                    }
-                ),
-                # Flush #6 - Last flush, update every stream until lsn: 108240872,
-                mock.call(
-                    {
-                        "currently_syncing": None,
-                        "bookmarks": {
-                            "logical1-logical1_edgydata": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108240872,
-                                "version": 1570922723596,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108240872,
-                                "version": 1570922723618,
-                                "xmin": None,
-                            },
-                            "logical1-logical1_table2": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108240872,
-                                "version": 1570922723635,
-                                "xmin": None,
-                            },
-                            "logical2-logical2_table1": {
-                                "last_replication_method": "LOG_BASED",
-                                "lsn": 108240872,
-                                "version": 1570922723651,
-                                "xmin": None,
-                            },
-                            "public-city": {
-                                "last_replication_method": "INCREMENTAL",
-                                "replication_key": "id",
-                                "version": 1570922723667,
-                                "replication_key_value": 4079,
-                            },
-                            "public-country": {
-                                "last_replication_method": "FULL_TABLE",
-                                "version": 1570922730456,
-                                "xmin": None,
-                            },
-                            "public2-wearehere": {},
-                        },
-                    }
-                ),
-            ],
+        target_duckdb.persist_lines(
+            connection,
+            {
+                **config,
+                "hard_delete": True,
+                "batch_size_rows": 10,
+                "flush_all_streams": True,
+            },
+            tap_lines,
         )
 
-        # Every table should be loaded correctly
-        self.assert_logical_streams_are_in_duckdb(True)
+        # State should be emitted 6 times, flushing every stream and updating every stream position
+        assert mock_emit_state.call_args_list == [
+            # Flush #1 - Flush every stream until lsn: 108197216
+            mock.call(
+                {
+                    "currently_syncing": None,
+                    "bookmarks": {
+                        "logical1-logical1_edgydata": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108197216,
+                            "version": 1570922723596,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108197216,
+                            "version": 1570922723618,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table2": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108197216,
+                            "version": 1570922723635,
+                            "xmin": None,
+                        },
+                        "logical2-logical2_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108197216,
+                            "version": 1570922723651,
+                            "xmin": None,
+                        },
+                        "public-city": {
+                            "last_replication_method": "INCREMENTAL",
+                            "replication_key": "id",
+                            "version": 1570922723667,
+                            "replication_key_value": 4079,
+                        },
+                        "public-country": {
+                            "last_replication_method": "FULL_TABLE",
+                            "version": 1570922730456,
+                            "xmin": None,
+                        },
+                        "public2-wearehere": {},
+                    },
+                }
+            ),
+            # Flush #2 - Flush every stream until lsn 108201336
+            mock.call(
+                {
+                    "currently_syncing": None,
+                    "bookmarks": {
+                        "logical1-logical1_edgydata": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108201336,
+                            "version": 1570922723596,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108201336,
+                            "version": 1570922723618,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table2": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108201336,
+                            "version": 1570922723635,
+                            "xmin": None,
+                        },
+                        "logical2-logical2_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108201336,
+                            "version": 1570922723651,
+                            "xmin": None,
+                        },
+                        "public-city": {
+                            "last_replication_method": "INCREMENTAL",
+                            "replication_key": "id",
+                            "version": 1570922723667,
+                            "replication_key_value": 4079,
+                        },
+                        "public-country": {
+                            "last_replication_method": "FULL_TABLE",
+                            "version": 1570922730456,
+                            "xmin": None,
+                        },
+                        "public2-wearehere": {},
+                    },
+                }
+            ),
+            # Flush #3 - Flush every stream until lsn: 108237600
+            mock.call(
+                {
+                    "currently_syncing": None,
+                    "bookmarks": {
+                        "logical1-logical1_edgydata": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108237600,
+                            "version": 1570922723596,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108237600,
+                            "version": 1570922723618,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table2": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108237600,
+                            "version": 1570922723635,
+                            "xmin": None,
+                        },
+                        "logical2-logical2_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108237600,
+                            "version": 1570922723651,
+                            "xmin": None,
+                        },
+                        "public-city": {
+                            "last_replication_method": "INCREMENTAL",
+                            "replication_key": "id",
+                            "version": 1570922723667,
+                            "replication_key_value": 4079,
+                        },
+                        "public-country": {
+                            "last_replication_method": "FULL_TABLE",
+                            "version": 1570922730456,
+                            "xmin": None,
+                        },
+                        "public2-wearehere": {},
+                    },
+                }
+            ),
+            # Flush #4 - Flush every stream until lsn: 108238768
+            mock.call(
+                {
+                    "currently_syncing": None,
+                    "bookmarks": {
+                        "logical1-logical1_edgydata": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108238768,
+                            "version": 1570922723596,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108238768,
+                            "version": 1570922723618,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table2": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108238768,
+                            "version": 1570922723635,
+                            "xmin": None,
+                        },
+                        "logical2-logical2_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108238768,
+                            "version": 1570922723651,
+                            "xmin": None,
+                        },
+                        "public-city": {
+                            "last_replication_method": "INCREMENTAL",
+                            "replication_key": "id",
+                            "version": 1570922723667,
+                            "replication_key_value": 4079,
+                        },
+                        "public-country": {
+                            "last_replication_method": "FULL_TABLE",
+                            "version": 1570922730456,
+                            "xmin": None,
+                        },
+                        "public2-wearehere": {},
+                    },
+                }
+            ),
+            # Flush #5 - Flush every stream until lsn: 108239704,
+            mock.call(
+                {
+                    "currently_syncing": None,
+                    "bookmarks": {
+                        "logical1-logical1_edgydata": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108239896,
+                            "version": 1570922723596,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108239896,
+                            "version": 1570922723618,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table2": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108239896,
+                            "version": 1570922723635,
+                            "xmin": None,
+                        },
+                        "logical2-logical2_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108239896,
+                            "version": 1570922723651,
+                            "xmin": None,
+                        },
+                        "public-city": {
+                            "last_replication_method": "INCREMENTAL",
+                            "replication_key": "id",
+                            "version": 1570922723667,
+                            "replication_key_value": 4079,
+                        },
+                        "public-country": {
+                            "last_replication_method": "FULL_TABLE",
+                            "version": 1570922730456,
+                            "xmin": None,
+                        },
+                        "public2-wearehere": {},
+                    },
+                }
+            ),
+            # Flush #6 - Last flush, update every stream until lsn: 108240872,
+            mock.call(
+                {
+                    "currently_syncing": None,
+                    "bookmarks": {
+                        "logical1-logical1_edgydata": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108240872,
+                            "version": 1570922723596,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108240872,
+                            "version": 1570922723618,
+                            "xmin": None,
+                        },
+                        "logical1-logical1_table2": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108240872,
+                            "version": 1570922723635,
+                            "xmin": None,
+                        },
+                        "logical2-logical2_table1": {
+                            "last_replication_method": "LOG_BASED",
+                            "lsn": 108240872,
+                            "version": 1570922723651,
+                            "xmin": None,
+                        },
+                        "public-city": {
+                            "last_replication_method": "INCREMENTAL",
+                            "replication_key": "id",
+                            "version": 1570922723667,
+                            "replication_key_value": 4079,
+                        },
+                        "public-country": {
+                            "last_replication_method": "FULL_TABLE",
+                            "version": 1570922730456,
+                            "xmin": None,
+                        },
+                        "public2-wearehere": {},
+                    },
+                }
+            ),
+        ]
 
-    def test_record_validation(self):
+        # Every table should be loaded correctly
+        self.assert_logical_streams_are_in_duckdb(target_schema, instance, True)
+
+    def test_record_validation(
+        self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+    ):
         """Test validating records"""
         tap_lines = test_utils.get_test_tap_lines("messages-with-invalid-records.json")
 
         # Loading invalid records when record validation enabled should fail at ...
-        self.config["validate_records"] = True
-
-        with self.assertRaises(RecordValidationException):
-            target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        with pytest.raises(RecordValidationException):
+            target_duckdb.persist_lines(
+                connection,
+                {**config, "validate_records": True},
+                tap_lines,
+            )
 
         # Loading invalid records when record validation disabled should fail at load time
-        self.config["validate_records"] = False
-        with self.assertRaises(Exception):
-            target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        with pytest.raises(Exception):
+            target_duckdb.persist_lines(
+                connection,
+                {**config, "validate_records": False},
+                tap_lines,
+            )
 
-    def test_loading_tables_with_custom_temp_dir(self):
+    def test_loading_tables_with_custom_temp_dir(
+        self,
+        config: dict[str, Any],
+        connection: duckdb.DuckDBPyConnection,
+        target_schema: str,
+        instance: DbSync,
+        tmp_path,
+    ):
         """Loading multiple tables from the same input tap using custom temp directory"""
         tap_lines = test_utils.get_test_tap_lines("messages-with-multiple-streams.json")
 
         # Setting custom temp_dir
-        if os.path.exists("/tmp/.pipelinewise-target-duckdb"):
-            shutil.rmtree("/tmp/.pipelinewise-target-duckdb")
-        os.mkdir("/tmp/.pipelinewise-target-duckdb")
-        self.config["temp_dir"] = "/tmp/.pipelinewise-target-duckdb"
-        target_duckdb.persist_lines(self.connection, self.config, tap_lines)
+        temp_dir = tmp_path / ".pipelinewise-target-duckdb"
+        temp_dir.mkdir()
+        target_duckdb.persist_lines(
+            connection,
+            {**config, "temp_dir": str(temp_dir)},
+            tap_lines,
+        )
 
-        self.assert_multiple_streams_are_into_duckdb()
+        self.assert_multiple_streams_are_into_duckdb(target_schema, instance)
 
 
 class TestIntegrationLocal:
     @pytest.fixture
-    def database_dir(self, tmp_path):
+    def database_dir(self, tmp_path: Path):
         """Create a temporary directory for the databases."""
         databases = tmp_path / "databases"
         databases.mkdir()
         return databases
 
     @pytest.fixture
-    def config(self, database_dir):
+    def config(self, database_dir: Path) -> dict[str, Any]:
         """Create a temporary directory for the databases."""
         return {
             "path": str(database_dir.joinpath("warehouse.db")),
             "default_target_schema": "test",
         }
 
-    def _assert_table_in_catalog_schema(self, db, catalog_name, schema_name):
+    def _assert_table_in_catalog_schema(
+        self,
+        db: DbSync,
+        catalog_name: str,
+        schema_name: str,
+    ):
         db.catalog_name = catalog_name
         db.create_schema_if_not_exists()
         db.query(f"CREATE TABLE {catalog_name}.{schema_name}.test_table (id INTEGER);")
         assert db.get_tables()
 
-    def test_create_schema_in_catalog(self, database_dir, config):
+    def test_create_schema_in_catalog(self, database_dir: Path, config: dict[str, Any]):
         connection = target_duckdb.duckdb_connect(config)
         with connection.cursor() as cur:
-            cur.query(
-                f"ATTACH '{database_dir}/db1.db';"
-                f"ATTACH '{database_dir}/db2.db';"
-            )
+            cur.query(f"ATTACH '{database_dir}/db1.db';ATTACH '{database_dir}/db2.db';")
         db = DbSync(connection, config)
         db.schema_name = "test_schema"
 
