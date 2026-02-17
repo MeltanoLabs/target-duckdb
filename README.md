@@ -63,7 +63,7 @@ Additional options in `config.json`:
 1. Install Tox
 
 ```
-uv tool install --with tox-gh --with tox-uv tox
+uv tool install --with tox-uv tox
 ```
 
 2. To run unit tests:
