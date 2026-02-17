@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
+from typing import Any, TypeAlias, Callable
 
 import duckdb
 import pytest
@@ -9,10 +10,7 @@ from dotenv import load_dotenv
 import target_duckdb
 from target_duckdb.db_sync import DbSync
 
-try:
-    import tests.utils as test_utils
-except ImportError:
-    import utils as test_utils
+FileLoader: TypeAlias = Callable[[str], list[str]]
 
 METADATA_COLUMNS = [
     "_sdc_extracted_at",
@@ -33,9 +31,30 @@ def target_schema() -> str:
 
 @pytest.fixture(scope="class")
 def config(target_schema: str) -> dict[str, Any]:
-    cfg = test_utils.get_db_config()
-    cfg["default_target_schema"] = target_schema
-    return cfg
+    config: dict[str, Any] = {}
+
+    # --------------------------------------------------------------------------
+    # Default configuration settings for integration tests.
+    # --------------------------------------------------------------------------
+    # The following values needs to be defined in environment variables with
+    # valid details to a local DuckDB file
+    # --------------------------------------------------------------------------
+    # DuckDB file path/schema
+    config["path"] = "md:target_duckdb"
+    config["default_target_schema"] = "integration_test_schema"
+
+    # --------------------------------------------------------------------------
+    # The following variables needs to be empty.
+    # The tests cases will set them automatically whenever it's needed
+    # --------------------------------------------------------------------------
+    config["disable_table_cache"] = None
+    config["schema_mapping"] = None
+    config["add_metadata_columns"] = None
+    config["hard_delete"] = None
+    config["flush_all_streams"] = None
+    config["default_target_schema"] = target_schema
+
+    return config
 
 
 @pytest.fixture
@@ -54,6 +73,17 @@ def instance(
 @pytest.fixture
 def prepare(target_schema: str, instance: DbSync):
     instance.conn.query(f"DROP SCHEMA IF EXISTS {target_schema} CASCADE")
+
+
+@pytest.fixture
+def get_test_tap_lines(shared_datadir: Path) -> FileLoader:
+    """Read test tap lines from a resource file."""
+
+    def _get_test_tap_lines(filename: str) -> list[str]:
+        with open(shared_datadir / filename) as tap_stdout:
+            return list(tap_stdout.readlines())
+
+    return _get_test_tap_lines
 
 
 def remove_metadata_columns_from_rows(rows: list[dict]) -> list[dict]:
