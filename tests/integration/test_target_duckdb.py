@@ -8,7 +8,7 @@ from unittest import mock
 
 import duckdb
 import target_duckdb
-from typing import Any
+from typing import TypeAlias, Any, Callable
 
 import pytest
 
@@ -21,10 +21,7 @@ from conftest import (
     remove_metadata_columns_from_rows,
 )
 
-try:
-    import tests.utils as test_utils
-except ImportError:
-    import utils as test_utils
+FileLoader: TypeAlias = Callable[[str], list[str]]
 
 
 @pytest.mark.usefixtures("prepare")
@@ -370,9 +367,10 @@ class TestIntegration:
         self,
         config: dict[str, Any],
         connection: duckdb.DuckDBPyConnection,
+        get_test_tap_lines: FileLoader,
     ):
         """Receiving invalid JSONs should raise an exception"""
-        tap_lines = test_utils.get_test_tap_lines("invalid-json.json")
+        tap_lines = get_test_tap_lines("invalid-json.json")
         with pytest.raises(json.decoder.JSONDecodeError):
             target_duckdb.persist_lines(connection, config, tap_lines)
 
@@ -380,9 +378,10 @@ class TestIntegration:
         self,
         config: dict[str, Any],
         connection: duckdb.DuckDBPyConnection,
+        get_test_tap_lines: FileLoader,
     ):
         """RECORD message without a previously received SCHEMA message should raise an exception"""
-        tap_lines = test_utils.get_test_tap_lines("invalid-message-order.json")
+        tap_lines = get_test_tap_lines("invalid-message-order.json")
         with pytest.raises(Exception):
             target_duckdb.persist_lines(connection, config, tap_lines)
 
@@ -392,9 +391,10 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Loading multiple tables from the same input tap with various columns types"""
-        tap_lines = test_utils.get_test_tap_lines("messages-with-multiple-streams.json")
+        tap_lines = get_test_tap_lines("messages-with-multiple-streams.json")
         target_duckdb.persist_lines(connection, config, tap_lines)
 
         self.assert_multiple_streams_are_into_duckdb(
@@ -408,9 +408,10 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Loading multiple tables from the same input tap with various columns types"""
-        tap_lines = test_utils.get_test_tap_lines("messages-with-multiple-streams.json")
+        tap_lines = get_test_tap_lines("messages-with-multiple-streams.json")
 
         # Turning on adding metadata columns
         target_duckdb.persist_lines(
@@ -432,9 +433,10 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Loading multiple tables from the same input tap with various columns types"""
-        tap_lines = test_utils.get_test_tap_lines("messages-with-multiple-streams.json")
+        tap_lines = get_test_tap_lines("messages-with-multiple-streams.json")
 
         # Turning on adding metadata columns
         target_duckdb.persist_lines(
@@ -454,9 +456,10 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Loading multiple tables from the same input tap with deleted rows"""
-        tap_lines = test_utils.get_test_tap_lines("messages-with-multiple-streams.json")
+        tap_lines = get_test_tap_lines("messages-with-multiple-streams.json")
 
         # Turning on hard delete mode
         target_duckdb.persist_lines(
@@ -479,9 +482,10 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Loading table with multiple SCHEMA messages"""
-        tap_lines = test_utils.get_test_tap_lines("messages-with-multiple-streams.json")
+        tap_lines = get_test_tap_lines("messages-with-multiple-streams.json")
 
         # Load with default settings
         target_duckdb.persist_lines(connection, config, tap_lines)
@@ -500,11 +504,10 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Loading a table where the name is a reserved word with deleted rows"""
-        tap_lines = test_utils.get_test_tap_lines(
-            "messages-with-reserved-name-as-table-name.json"
-        )
+        tap_lines = get_test_tap_lines("messages-with-reserved-name-as-table-name.json")
 
         # Turning on hard delete mode
         target_duckdb.persist_lines(
@@ -527,11 +530,10 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Loading a table where the name has space"""
-        tap_lines = test_utils.get_test_tap_lines(
-            "messages-with-space-in-table-name.json"
-        )
+        tap_lines = get_test_tap_lines("messages-with-space-in-table-name.json")
 
         # Turning on hard delete mode
         target_duckdb.persist_lines(
@@ -554,11 +556,10 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Loading unicode encoded characters"""
-        tap_lines = test_utils.get_test_tap_lines(
-            "messages-with-unicode-characters.json"
-        )
+        tap_lines = get_test_tap_lines("messages-with-unicode-characters.json")
 
         # Load with default settings
         target_duckdb.persist_lines(connection, config, tap_lines)
@@ -616,9 +617,10 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Loading long texts"""
-        tap_lines = test_utils.get_test_tap_lines("messages-with-long-texts.json")
+        tap_lines = get_test_tap_lines("messages-with-long-texts.json")
 
         # Load with default settings
         target_duckdb.persist_lines(connection, config, tap_lines)
@@ -672,11 +674,10 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Loading non-db friendly columns like, camelcase, minus signs, etc."""
-        tap_lines = test_utils.get_test_tap_lines(
-            "messages-with-non-db-friendly-columns.json"
-        )
+        tap_lines = get_test_tap_lines("messages-with-non-db-friendly-columns.json")
 
         # Load with default settings
         target_duckdb.persist_lines(connection, config, tap_lines)
@@ -722,9 +723,10 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Loading nested JSON objects into JSON columns without flattening"""
-        tap_lines = test_utils.get_test_tap_lines("messages-with-nested-schema.json")
+        tap_lines = get_test_tap_lines("messages-with-nested-schema.json")
 
         # Load with default settings - Flattening disabled
         target_duckdb.persist_lines(connection, config, tap_lines)
@@ -762,9 +764,10 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Loading nested JSON objects with flattening and not not flattening"""
-        tap_lines = test_utils.get_test_tap_lines("messages-with-nested-schema.json")
+        tap_lines = get_test_tap_lines("messages-with-nested-schema.json")
 
         # Load with flattening enabled
         target_duckdb.persist_lines(
@@ -801,12 +804,13 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Tests correct renaming of duckdb columns after source change"""
-        tap_lines_before_column_name_change = test_utils.get_test_tap_lines(
+        tap_lines_before_column_name_change = get_test_tap_lines(
             "messages-with-multiple-streams.json"
         )
-        tap_lines_after_column_name_change = test_utils.get_test_tap_lines(
+        tap_lines_after_column_name_change = get_test_tap_lines(
             "messages-with-multiple-streams-modified-column.json"
         )
 
@@ -908,9 +912,10 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Load stream into a specific schema, create indices and grant permissions"""
-        tap_lines = test_utils.get_test_tap_lines("messages-with-multiple-streams.json")
+        tap_lines = get_test_tap_lines("messages-with-multiple-streams.json")
 
         # Use schema mapping with hard delete instead of default_target_schema
         schema_mapping_config = {
@@ -942,9 +947,10 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Tests logical streams from pg with inserts, updates and deletes"""
-        tap_lines = test_utils.get_test_tap_lines("messages-pg-logical-streams.json")
+        tap_lines = get_test_tap_lines("messages-pg-logical-streams.json")
 
         # Turning on hard delete mode
         target_duckdb.persist_lines(
@@ -961,9 +967,10 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Tests logical streams from pg with inserts, updates and deletes"""
-        tap_lines = test_utils.get_test_tap_lines("messages-pg-logical-streams.json")
+        tap_lines = get_test_tap_lines("messages-pg-logical-streams.json")
 
         # Turning on hard delete mode
         target_duckdb.persist_lines(
@@ -980,11 +987,10 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Tests logical streams from pg with inserts, updates and deletes"""
-        tap_lines = test_utils.get_test_tap_lines(
-            "messages-pg-logical-streams-no-records.json"
-        )
+        tap_lines = get_test_tap_lines("messages-pg-logical-streams-no-records.json")
 
         # Turning on hard delete mode
         target_duckdb.persist_lines(
@@ -1003,10 +1009,11 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Test emitting states when no intermediate flush required"""
         mock_emit_state.get.return_value = None
-        tap_lines = test_utils.get_test_tap_lines("messages-pg-logical-streams.json")
+        tap_lines = get_test_tap_lines("messages-pg-logical-streams.json")
 
         # Set batch size big enough to never has to flush in the middle
         target_duckdb.persist_lines(
@@ -1073,10 +1080,11 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Test emitting states when intermediate flushes required"""
         mock_emit_state.get.return_value = None
-        tap_lines = test_utils.get_test_tap_lines("messages-pg-logical-streams.json")
+        tap_lines = get_test_tap_lines("messages-pg-logical-streams.json")
 
         # Set batch size small enough to trigger multiple stream flushes
         target_duckdb.persist_lines(
@@ -1364,10 +1372,11 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
+        get_test_tap_lines: FileLoader,
     ):
         """Test emitting states when intermediate flushes required and flush_all_streams is enabled"""
         mock_emit_state.get.return_value = None
-        tap_lines = test_utils.get_test_tap_lines("messages-pg-logical-streams.json")
+        tap_lines = get_test_tap_lines("messages-pg-logical-streams.json")
 
         # Set batch size small enough to trigger multiple stream flushes
         target_duckdb.persist_lines(
@@ -1656,9 +1665,10 @@ class TestIntegration:
         self,
         config: dict[str, Any],
         connection: duckdb.DuckDBPyConnection,
+        get_test_tap_lines: FileLoader,
     ):
         """Test validating records"""
-        tap_lines = test_utils.get_test_tap_lines("messages-with-invalid-records.json")
+        tap_lines = get_test_tap_lines("messages-with-invalid-records.json")
 
         # Loading invalid records when record validation enabled should fail at ...
         with pytest.raises(RecordValidationException):
@@ -1682,10 +1692,11 @@ class TestIntegration:
         connection: duckdb.DuckDBPyConnection,
         target_schema: str,
         instance: DbSync,
-        tmp_path,
+        tmp_path: Path,
+        get_test_tap_lines: FileLoader,
     ):
         """Loading multiple tables from the same input tap using custom temp directory"""
-        tap_lines = test_utils.get_test_tap_lines("messages-with-multiple-streams.json")
+        tap_lines = get_test_tap_lines("messages-with-multiple-streams.json")
 
         # Setting custom temp_dir
         temp_dir = tmp_path / ".pipelinewise-target-duckdb"
