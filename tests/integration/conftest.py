@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 from typing import Any, TypeAlias, Callable
 
@@ -26,11 +27,16 @@ def _load_env():
 
 @pytest.fixture(scope="session")
 def target_schema() -> str:
-    return "integration_test_schema"
+    return f"s{uuid.uuid4().hex[:8]}_integration_tests"
+
+
+@pytest.fixture(scope="session")
+def db_path() -> str:
+    return "md:target_duckdb"
 
 
 @pytest.fixture(scope="class")
-def config(target_schema: str) -> dict[str, Any]:
+def config(target_schema: str, db_path: str) -> dict[str, Any]:
     config: dict[str, Any] = {}
 
     # --------------------------------------------------------------------------
@@ -40,8 +46,7 @@ def config(target_schema: str) -> dict[str, Any]:
     # valid details to a local DuckDB file
     # --------------------------------------------------------------------------
     # DuckDB file path/schema
-    config["path"] = "md:target_duckdb"
-    config["default_target_schema"] = "integration_test_schema"
+    config["path"] = db_path
 
     # --------------------------------------------------------------------------
     # The following variables needs to be empty.
@@ -68,6 +73,16 @@ def instance(
     connection: duckdb.DuckDBPyConnection,
 ) -> DbSync:
     return DbSync(connection, config)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _drop_schema_after_session(target_schema: str, db_path: str):
+    yield
+    conn = duckdb.connect(db_path)
+    try:
+        conn.query(f"DROP SCHEMA IF EXISTS {target_schema} CASCADE")
+    finally:
+        conn.close()
 
 
 @pytest.fixture

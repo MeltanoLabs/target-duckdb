@@ -924,7 +924,7 @@ class TestIntegration:
         schema_mapping_config["hard_delete"] = True
         schema_mapping_config["schema_mapping"] = {
             "tap_mysql_test": {
-                "target_schema": "integration_test_schema",
+                "target_schema": target_schema,
                 "indices": {
                     "test_table_one": ["c_varchar"],
                     "test_table_two": ["c_varchar", "c_int"],
