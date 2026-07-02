@@ -87,6 +87,15 @@ def emit_state(state):
         sys.stdout.flush()
 
 
+def batch_manifest_paths(manifest):
+    """Strip the `file://` URI scheme off each entry in a BATCH message's manifest,
+    returning plain local filesystem paths."""
+    return [
+        path[len("file://") :] if path.startswith("file://") else path
+        for path in manifest
+    ]
+
+
 # pylint: disable=missing-function-docstring,missing-class-docstring
 def validate_config(config):
     errors = []
@@ -296,6 +305,51 @@ def persist_lines(connection, config, lines) -> None:
 
             row_count[stream] = 0
             total_row_count[stream] = 0
+
+        elif t == "BATCH":
+            if "stream" not in o:
+                raise Exception(
+                    "Line is missing required key 'stream': {}".format(line)
+                )
+            stream = o["stream"]
+            if stream not in schemas:
+                raise Exception(
+                    "A batch for stream {} was encountered before a corresponding schema".format(
+                        stream
+                    )
+                )
+
+            if config.get("add_metadata_columns") or config.get("hard_delete"):
+                LOGGER.warning(
+                    "add_metadata_columns/hard_delete are not supported for BATCH-sourced "
+                    "records (stream %s); _sdc_* columns will be left NULL for this batch.",
+                    stream,
+                )
+
+            # Both encodings are loaded directly by DuckDB's native table functions
+            # (`read_arrow`/`read_json`) -- no per-row Python materialization, so
+            # row_count/total_row_count (RECORD-mode's dedup-by-PK bookkeeping) aren't
+            # touched here, and there's nothing to explicitly flush/checkpoint: STATE is
+            # still emitted normally whenever an actual STATE message line arrives.
+            encoding = o.get("encoding", {})
+            batch_format = encoding.get("format")
+            file_paths = batch_manifest_paths(o.get("manifest", []))
+
+            if batch_format == "arrow":
+                stream_to_sync[stream].load_rows_from_arrow_files(file_paths)
+
+            elif batch_format == "jsonl":
+                stream_to_sync[stream].load_rows_from_json_files(
+                    file_paths, compression=encoding.get("compression")
+                )
+
+            else:
+                raise Exception(
+                    "Unsupported BATCH encoding format '{}' for stream {} "
+                    "(only 'arrow' and 'jsonl' are supported)".format(
+                        batch_format, stream
+                    )
+                )
 
         elif t == "ACTIVATE_VERSION":
             LOGGER.debug("ACTIVATE_VERSION message")
