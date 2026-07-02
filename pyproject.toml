@@ -26,6 +26,7 @@ test = [
     "pytest>=9",
     "pytest-datadir>=1.8.0",
     "python-dotenv>=1.2.1",
+    "pyarrow>=17",
 ]
 typing = [
     { include-group = "test" },

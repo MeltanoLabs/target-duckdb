@@ -1,6 +1,16 @@
 from __future__ import annotations
 
+import gzip
+import json
+import os
+
+import duckdb
+import pyarrow as pa
+import pyarrow.ipc as ipc
+import pytest
+
 import target_duckdb
+from target_duckdb.db_sync import DbSync
 
 
 def test_config_validation():
@@ -299,3 +309,373 @@ def test_flatten_record_with_flatten_schema():
             record, flatten_schema if should_use_flatten_schema else None
         )
         assert output == expected_output
+
+
+def _write_arrow_ipc_file(tmp_path, rows, name="batch.arrow"):
+    batch = pa.RecordBatch.from_pylist(rows)
+    path = str(tmp_path / name)
+    with ipc.new_file(path, batch.schema) as writer:
+        writer.write_batch(batch)
+    return path
+
+
+def _schema_message(stream, key_properties=("id",)):
+    return {
+        "stream": stream,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "id": {"type": ["null", "integer"]},
+                "name": {"type": ["null", "string"]},
+            },
+        },
+        "key_properties": list(key_properties),
+    }
+
+
+@pytest.fixture
+def local_connection():
+    conn = duckdb.connect(":memory:")
+    yield conn
+    conn.close()
+
+
+class TestLoadRowsFromArrowFiles:
+    """Exercises DbSync.load_rows_from_arrow_files against a real (local, in-memory)
+    DuckDB connection and a real Arrow IPC file -- this needs network access the first
+    time, to fetch DuckDB's `arrow` community extension (cached locally afterwards)."""
+
+    def _make_db_sync(
+        self, local_connection, stream="mydb-mytable", key_properties=("id",)
+    ):
+        config = {"default_target_schema": "public"}
+        db_sync = DbSync(
+            local_connection, config, _schema_message(stream, key_properties)
+        )
+        db_sync.create_schema_if_not_exists()
+        db_sync.sync_table()
+        return db_sync
+
+    def test_loads_rows_from_a_single_arrow_file(self, tmp_path, local_connection):
+        db_sync = self._make_db_sync(local_connection)
+        path = _write_arrow_ipc_file(
+            tmp_path, [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]
+        )
+
+        db_sync.load_rows_from_arrow_files([path])
+
+        rows = db_sync.query('SELECT * FROM "public"."mytable" ORDER BY id')
+        assert [(r["id"], r["name"]) for r in rows] == [(1, "a"), (2, "b")]
+
+    def test_loads_rows_from_multiple_arrow_files(self, tmp_path, local_connection):
+        db_sync = self._make_db_sync(local_connection)
+        path1 = _write_arrow_ipc_file(
+            tmp_path, [{"id": 1, "name": "a"}], name="b1.arrow"
+        )
+        path2 = _write_arrow_ipc_file(
+            tmp_path, [{"id": 2, "name": "b"}], name="b2.arrow"
+        )
+
+        db_sync.load_rows_from_arrow_files([path1, path2])
+
+        rows = db_sync.query('SELECT * FROM "public"."mytable" ORDER BY id')
+        assert [(r["id"], r["name"]) for r in rows] == [(1, "a"), (2, "b")]
+
+    def test_upserts_on_primary_key(self, tmp_path, local_connection):
+        db_sync = self._make_db_sync(local_connection)
+        path1 = _write_arrow_ipc_file(
+            tmp_path, [{"id": 1, "name": "original"}], name="b1.arrow"
+        )
+        db_sync.load_rows_from_arrow_files([path1])
+
+        path2 = _write_arrow_ipc_file(
+            tmp_path,
+            [{"id": 1, "name": "updated"}, {"id": 2, "name": "new"}],
+            name="b2.arrow",
+        )
+        db_sync.load_rows_from_arrow_files([path2])
+
+        rows = db_sync.query('SELECT * FROM "public"."mytable" ORDER BY id')
+        assert [(r["id"], r["name"]) for r in rows] == [(1, "updated"), (2, "new")]
+
+    def test_extra_target_columns_absent_from_arrow_file_become_null(
+        self, tmp_path, local_connection
+    ):
+        # simulates add_metadata_columns: the target table has _sdc_* columns the Arrow
+        # file doesn't carry.
+        schema_msg = _schema_message("mydb-withmeta")
+        schema_msg["schema"]["properties"]["_sdc_extracted_at"] = {
+            "type": ["null", "string"]
+        }
+        config = {"default_target_schema": "public"}
+        db_sync = DbSync(local_connection, config, schema_msg)
+        db_sync.create_schema_if_not_exists()
+        db_sync.sync_table()
+
+        path = _write_arrow_ipc_file(tmp_path, [{"id": 1, "name": "a"}])
+        db_sync.load_rows_from_arrow_files([path])
+
+        rows = db_sync.query('SELECT * FROM "public"."withmeta"')
+        assert rows == [{"id": 1, "name": "a", "_sdc_extracted_at": None}]
+
+    def test_deletes_processed_files_after_successful_load(
+        self, tmp_path, local_connection
+    ):
+        db_sync = self._make_db_sync(local_connection)
+        path1 = _write_arrow_ipc_file(
+            tmp_path, [{"id": 1, "name": "a"}], name="b1.arrow"
+        )
+        path2 = _write_arrow_ipc_file(
+            tmp_path, [{"id": 2, "name": "b"}], name="b2.arrow"
+        )
+
+        db_sync.load_rows_from_arrow_files([path1, path2])
+
+        assert not os.path.exists(path1)
+        assert not os.path.exists(path2)
+
+    def test_does_not_delete_files_when_flattening_guard_raises(
+        self, tmp_path, local_connection
+    ):
+        config = {"default_target_schema": "public", "data_flattening_max_level": 1}
+        db_sync = DbSync(
+            local_connection, config, _nested_schema_message("mydb-nested-keep")
+        )
+        db_sync.create_schema_if_not_exists()
+        db_sync.sync_table()
+
+        path = _write_arrow_ipc_file(tmp_path, [{"id": 1, "name": "a"}])
+        with pytest.raises(Exception, match="data_flattening_max_level"):
+            db_sync.load_rows_from_arrow_files([path])
+
+        assert os.path.exists(path)
+
+
+def _write_jsonl_file(tmp_path, rows, name="batch.jsonl", compress=False):
+    opener = gzip.open if compress else open
+    path = tmp_path / name
+    with opener(path, "wt", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row) + "\n")
+    return str(path)
+
+
+class TestLoadRowsFromJsonFiles:
+    """Exercises DbSync.load_rows_from_json_files against a real (local, in-memory)
+    DuckDB connection and real newline-delimited JSON files, both plain and
+    gzip-compressed."""
+
+    def _make_db_sync(
+        self, local_connection, stream="mydb-mytable", key_properties=("id",)
+    ):
+        config = {"default_target_schema": "public"}
+        db_sync = DbSync(
+            local_connection, config, _schema_message(stream, key_properties)
+        )
+        db_sync.create_schema_if_not_exists()
+        db_sync.sync_table()
+        return db_sync
+
+    def test_loads_rows_from_a_plain_jsonl_file(self, tmp_path, local_connection):
+        db_sync = self._make_db_sync(local_connection)
+        path = _write_jsonl_file(
+            tmp_path, [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]
+        )
+
+        db_sync.load_rows_from_json_files([path])
+
+        rows = db_sync.query('SELECT * FROM "public"."mytable" ORDER BY id')
+        assert [(r["id"], r["name"]) for r in rows] == [(1, "a"), (2, "b")]
+
+    def test_loads_rows_from_a_gzip_compressed_jsonl_file(
+        self, tmp_path, local_connection
+    ):
+        db_sync = self._make_db_sync(local_connection)
+        path = _write_jsonl_file(
+            tmp_path,
+            [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}],
+            name="batch.jsonl.gz",
+            compress=True,
+        )
+
+        db_sync.load_rows_from_json_files([path], compression="gzip")
+
+        rows = db_sync.query('SELECT * FROM "public"."mytable" ORDER BY id')
+        assert [(r["id"], r["name"]) for r in rows] == [(1, "a"), (2, "b")]
+
+    def test_loads_rows_from_multiple_jsonl_files(self, tmp_path, local_connection):
+        db_sync = self._make_db_sync(local_connection)
+        path1 = _write_jsonl_file(tmp_path, [{"id": 1, "name": "a"}], name="b1.jsonl")
+        path2 = _write_jsonl_file(tmp_path, [{"id": 2, "name": "b"}], name="b2.jsonl")
+
+        db_sync.load_rows_from_json_files([path1, path2])
+
+        rows = db_sync.query('SELECT * FROM "public"."mytable" ORDER BY id')
+        assert [(r["id"], r["name"]) for r in rows] == [(1, "a"), (2, "b")]
+
+    def test_upserts_on_primary_key(self, tmp_path, local_connection):
+        db_sync = self._make_db_sync(local_connection)
+        path1 = _write_jsonl_file(
+            tmp_path, [{"id": 1, "name": "original"}], name="b1.jsonl"
+        )
+        db_sync.load_rows_from_json_files([path1])
+
+        path2 = _write_jsonl_file(
+            tmp_path,
+            [{"id": 1, "name": "updated"}, {"id": 2, "name": "new"}],
+            name="b2.jsonl",
+        )
+        db_sync.load_rows_from_json_files([path2])
+
+        rows = db_sync.query('SELECT * FROM "public"."mytable" ORDER BY id')
+        assert [(r["id"], r["name"]) for r in rows] == [(1, "updated"), (2, "new")]
+
+    def test_extra_target_columns_absent_from_json_file_become_null(
+        self, tmp_path, local_connection
+    ):
+        schema_msg = _schema_message("mydb-withmetajson")
+        schema_msg["schema"]["properties"]["_sdc_extracted_at"] = {
+            "type": ["null", "string"]
+        }
+        config = {"default_target_schema": "public"}
+        db_sync = DbSync(local_connection, config, schema_msg)
+        db_sync.create_schema_if_not_exists()
+        db_sync.sync_table()
+
+        path = _write_jsonl_file(tmp_path, [{"id": 1, "name": "a"}])
+        db_sync.load_rows_from_json_files([path])
+
+        rows = db_sync.query('SELECT * FROM "public"."withmetajson"')
+        assert rows == [{"id": 1, "name": "a", "_sdc_extracted_at": None}]
+
+    def test_nested_object_and_array_values_land_as_json(
+        self, tmp_path, local_connection
+    ):
+        schema_msg = _schema_message("mydb-nested")
+        schema_msg["schema"]["properties"]["meta"] = {"type": ["null", "object"]}
+        schema_msg["schema"]["properties"]["tags"] = {"type": ["null", "array"]}
+        config = {"default_target_schema": "public"}
+        db_sync = DbSync(local_connection, config, schema_msg)
+        db_sync.create_schema_if_not_exists()
+        db_sync.sync_table()
+
+        path = _write_jsonl_file(
+            tmp_path, [{"id": 1, "meta": {"x": 1}, "tags": ["a", "b"]}]
+        )
+        db_sync.load_rows_from_json_files([path])
+
+        rows = db_sync.query('SELECT * FROM "public"."nested"')
+        assert rows == [{"id": 1, "meta": '{"x":1}', "name": None, "tags": '["a","b"]'}]
+
+    def test_deletes_processed_files_after_successful_load(
+        self, tmp_path, local_connection
+    ):
+        db_sync = self._make_db_sync(local_connection)
+        path1 = _write_jsonl_file(tmp_path, [{"id": 1, "name": "a"}], name="b1.jsonl")
+        path2 = _write_jsonl_file(tmp_path, [{"id": 2, "name": "b"}], name="b2.jsonl")
+
+        db_sync.load_rows_from_json_files([path1, path2])
+
+        assert not os.path.exists(path1)
+        assert not os.path.exists(path2)
+
+    def test_does_not_delete_files_when_flattening_guard_raises(
+        self, tmp_path, local_connection
+    ):
+        config = {"default_target_schema": "public", "data_flattening_max_level": 1}
+        db_sync = DbSync(
+            local_connection, config, _nested_schema_message("mydb-nested-keep-json")
+        )
+        db_sync.create_schema_if_not_exists()
+        db_sync.sync_table()
+
+        path = _write_jsonl_file(tmp_path, [{"id": 1, "c_obj": {"nested_prop1": "x"}}])
+        with pytest.raises(Exception, match="data_flattening_max_level"):
+            db_sync.load_rows_from_json_files([path])
+
+        assert os.path.exists(path)
+
+
+def _nested_schema_message(stream, key_properties=("id",)):
+    return {
+        "stream": stream,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "id": {"type": ["null", "integer"]},
+                "c_obj": {
+                    "type": ["null", "object"],
+                    "properties": {
+                        "nested_prop1": {"type": ["null", "string"]},
+                    },
+                },
+            },
+        },
+        "key_properties": list(key_properties),
+    }
+
+
+class TestBatchFlatteningGuard:
+    """data_flattening_max_level > 0 actually flattening a stream's schema is incompatible
+    with the native BY-NAME BATCH loading paths (the source file has the original nested
+    column, not the flattened name) -- this should raise a clear error rather than either
+    silently dropping the nested value or surfacing DuckDB's own confusing BinderException.
+    """
+
+    def test_arrow_raises_when_flattening_applies(self, tmp_path, local_connection):
+        config = {"default_target_schema": "public", "data_flattening_max_level": 1}
+        db_sync = DbSync(
+            local_connection, config, _nested_schema_message("mydb-nested-arrow")
+        )
+        db_sync.create_schema_if_not_exists()
+        db_sync.sync_table()
+
+        path = _write_arrow_ipc_file(tmp_path, [{"id": 1, "name": "a"}])
+        with pytest.raises(Exception, match="data_flattening_max_level"):
+            db_sync.load_rows_from_arrow_files([path])
+
+    def test_json_raises_when_flattening_applies(self, tmp_path, local_connection):
+        config = {"default_target_schema": "public", "data_flattening_max_level": 1}
+        db_sync = DbSync(
+            local_connection, config, _nested_schema_message("mydb-nested-json")
+        )
+        db_sync.create_schema_if_not_exists()
+        db_sync.sync_table()
+
+        path = _write_jsonl_file(tmp_path, [{"id": 1, "c_obj": {"nested_prop1": "x"}}])
+        with pytest.raises(Exception, match="data_flattening_max_level"):
+            db_sync.load_rows_from_json_files([path])
+
+    def test_does_not_raise_when_max_level_is_zero_despite_nested_schema(
+        self, tmp_path, local_connection
+    ):
+        # default max_level=0 means flatten_schema never actually renames anything, even
+        # though the schema itself has a nested object -- should load fine as a JSON column.
+        config = {"default_target_schema": "public"}
+        db_sync = DbSync(
+            local_connection, config, _nested_schema_message("mydb-unflattened")
+        )
+        db_sync.create_schema_if_not_exists()
+        db_sync.sync_table()
+
+        path = _write_jsonl_file(tmp_path, [{"id": 1, "c_obj": {"nested_prop1": "x"}}])
+        db_sync.load_rows_from_json_files([path])  # should not raise
+
+        rows = db_sync.query('SELECT * FROM "public"."unflattened"')
+        assert rows == [{"id": 1, "c_obj": '{"nested_prop1":"x"}'}]
+
+    def test_does_not_raise_when_max_level_set_but_schema_has_no_nested_properties(
+        self, tmp_path, local_connection
+    ):
+        # data_flattening_max_level > 0 with a flat schema is harmless: flatten_schema
+        # produces the same column names as the raw schema either way.
+        config = {"default_target_schema": "public", "data_flattening_max_level": 1}
+        db_sync = DbSync(local_connection, config, _schema_message("mydb-flatalready"))
+        db_sync.create_schema_if_not_exists()
+        db_sync.sync_table()
+
+        path = _write_jsonl_file(tmp_path, [{"id": 1, "name": "a"}])
+        db_sync.load_rows_from_json_files([path])  # should not raise
+
+        rows = db_sync.query('SELECT * FROM "public"."flatalready"')
+        assert rows == [{"id": 1, "name": "a"}]

@@ -402,6 +402,104 @@ class DbSync:
         cur.execute(f"DROP TABLE {temp_table}")
         os.unlink(temp_file_csv)
 
+    def _check_batch_flattening_supported(self):
+        """BATCH-sourced files carry their original (unflattened) column/property names --
+        e.g. a nested `c_obj` object stays a single `c_obj` column -- but when
+        data_flattening_max_level > 0 actually flattens a stream's schema, the target table
+        instead has columns like `c_obj__nested_prop1`. `INSERT ... BY NAME` can't bridge
+        that gap (it would either silently drop the nested value or, since DuckDB requires
+        every *source* column to exist in the target, raise a confusing BinderException like
+        "does not have a column with name 'c_obj'"). Fail clearly instead.
+        """
+        stream_schema_message = self.stream_schema_message
+        raw_property_names = set(
+            stream_schema_message["schema"].get("properties", {}).keys()
+        )
+        flattened_names = set(self.flatten_schema.keys())
+        if flattened_names != raw_property_names:
+            raise Exception(
+                "data_flattening_max_level > 0 is not supported for BATCH-sourced streams "
+                "with nested object/array properties (stream {!r}). Set "
+                "data_flattening_max_level=0 (the default) for this stream, or disable "
+                "BATCH mode for it.".format(stream_schema_message["stream"])
+            )
+
+    def _load_rows_from_files_by_name(self, file_paths, table_function_sql, log_label):
+        """Shared implementation for loading BATCH manifest files directly into the target
+        table via a DuckDB table function (`read_arrow`/`read_json`), matching columns by
+        name (`INSERT ... BY NAME`) rather than position. This tolerates the source file's
+        column order differing from `flatten_schema`'s, and leaves any target column absent
+        from the source (e.g. `_sdc_*` metadata columns, which aren't populated for
+        BATCH-sourced records) as NULL.
+
+        `table_function_sql` must be a template string with a single `{file_path}`
+        placeholder producing the table function call, e.g. "read_arrow(?)".
+
+        Once all files are durably loaded into the target table, they're deleted from disk
+        -- Singer BATCH files are meant to be consumed, not kept around indefinitely, and
+        nothing upstream (the tap, or the pipeline runner) cleans them up otherwise. Deletion
+        only happens after the full upsert succeeds, so a failure partway through a
+        multi-file batch leaves every source file intact for a retry.
+        """
+        self._check_batch_flattening_supported()
+
+        stream_schema_message = self.stream_schema_message
+        stream = stream_schema_message["stream"]
+        self.logger.info(
+            "Loading %s batch file(s) into '%s': %s",
+            log_label,
+            self.table_name(stream, False),
+            file_paths,
+        )
+
+        cur = self.conn
+        temp_table = self.table_name(stream, is_temporary=True)
+        cur.execute(self.create_table_query(table_name=temp_table, is_temporary=True))
+
+        for file_path in file_paths:
+            cur.execute(
+                f"INSERT INTO {temp_table} BY NAME SELECT * FROM {table_function_sql}",
+                [file_path],
+            )
+
+        if len(self.stream_schema_message["key_properties"]) > 0:
+            cur.execute(self.update_from_temp_table(temp_table))
+        cur.execute(self.insert_from_temp_table(temp_table))
+        cur.execute(f"DROP TABLE {temp_table}")
+
+        for file_path in file_paths:
+            try:
+                os.remove(file_path)
+            except OSError as exc:
+                self.logger.warning(
+                    "Could not remove processed batch file %s: %s", file_path, exc
+                )
+
+    def load_rows_from_arrow_files(self, file_paths):
+        """Load one or more Arrow IPC files (from a Singer BATCH message's manifest,
+        encoding.format == "arrow") directly into the target table via DuckDB's native
+        `arrow` community extension -- no Python-side row materialization at all.
+        """
+        self.conn.execute("INSTALL arrow FROM community")
+        self.conn.execute("LOAD arrow")
+        self._load_rows_from_files_by_name(file_paths, "read_arrow(?)", "Arrow")
+
+    def load_rows_from_json_files(self, file_paths, compression=None):
+        """Load one or more newline-delimited JSON files (from a Singer BATCH message's
+        manifest, encoding.format == "jsonl", optionally gzip-compressed) directly into the
+        target table via DuckDB's native JSON reader -- no Python-side row materialization.
+
+        Note: unlike RECORD-mode's `load_rows`/`flatten_record`, this does not apply
+        `data_flattening_max_level` flattening -- nested objects/arrays land as-is in a
+        single JSON-typed column, matching RECORD-mode's own behavior at the default
+        max_level=0. See `_check_batch_flattening_supported`: if flattening actually applies
+        for this stream (max_level > 0 and the schema has nested properties), this raises
+        instead of silently mismatching columns.
+        """
+        duckdb_compression = "gzip" if compression == "gzip" else "uncompressed"
+        table_function_sql = f"read_json(?, format='newline_delimited', compression='{duckdb_compression}')"
+        self._load_rows_from_files_by_name(file_paths, table_function_sql, "JSON")
+
     # pylint: disable=duplicate-string-formatting-argument
     def insert_from_temp_table(self, temp_table):
         stream_schema_message = self.stream_schema_message
