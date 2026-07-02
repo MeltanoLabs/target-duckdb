@@ -3,7 +3,7 @@ updates:
   - package-ecosystem: uv
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: monthly
     versioning-strategy: lockfile-only
     cooldown:
       default-days: 7
@@ -16,7 +16,7 @@ updates:
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: "monthly"
+      interval: quarterly
     groups:
       actions:
         patterns:
