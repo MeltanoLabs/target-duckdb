@@ -9,10 +9,13 @@ updates:
       default-days: 7
     allow:
       - dependency-type: "all"
+    all:
+      patterns:
+          - "*"
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     groups:
       actions:
         patterns:
