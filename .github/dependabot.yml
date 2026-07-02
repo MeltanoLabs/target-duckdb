@@ -9,8 +9,9 @@ updates:
       default-days: 7
     allow:
       - dependency-type: "all"
-    all:
-      patterns:
+    groups:
+      all:
+        patterns:
           - "*"
   - package-ecosystem: github-actions
     directory: "/"
