@@ -340,6 +340,44 @@ def local_connection():
     conn.close()
 
 
+class TestLoadRows:
+    """Exercises DbSync.load_rows (RECORD-mode loading) against a real (local, in-memory)
+    DuckDB connection."""
+
+    def _make_db_sync(
+        self, local_connection, stream="mydb-mytable", key_properties=("id",)
+    ):
+        config = {"default_target_schema": "public"}
+        db_sync = DbSync(
+            local_connection, config, _schema_message(stream, key_properties)
+        )
+        db_sync.create_schema_if_not_exists()
+        db_sync.sync_table()
+        return db_sync
+
+    def test_load_rows_emits_a_record_count_metric(
+        self, tmp_path, local_connection, capsys
+    ):
+        # DbSync's logger is configured via get_logger()'s logging.config.fileConfig(), which
+        # resets the root logger's handlers -- including pytest's caplog handler -- so the
+        # emitted METRIC line has to be asserted from the real stderr stream (capsys) instead
+        # of caplog.
+        db_sync = self._make_db_sync(local_connection, stream="mydb-mytable")
+        records = [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]
+
+        db_sync.load_rows(records, len(records), str(tmp_path))
+
+        metric_lines = [
+            line for line in capsys.readouterr().err.splitlines() if "METRIC:" in line
+        ]
+        assert len(metric_lines) == 1
+        payload = json.loads(metric_lines[0].split("METRIC:", 1)[1])
+        assert payload["type"] == "counter"
+        assert payload["metric"] == "record_count"
+        assert payload["value"] == 2
+        assert payload["tags"] == {"stream": "mydb-mytable"}
+
+
 class TestLoadRowsFromArrowFiles:
     """Exercises DbSync.load_rows_from_arrow_files against a real (local, in-memory)
     DuckDB connection and a real Arrow IPC file -- this needs network access the first
@@ -366,6 +404,38 @@ class TestLoadRowsFromArrowFiles:
 
         rows = db_sync.query('SELECT * FROM "public"."mytable" ORDER BY id')
         assert [(r["id"], r["name"]) for r in rows] == [(1, "a"), (2, "b")]
+
+    def test_load_rows_from_arrow_files_returns_row_count(
+        self, tmp_path, local_connection
+    ):
+        db_sync = self._make_db_sync(local_connection)
+        path = _write_arrow_ipc_file(
+            tmp_path, [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]
+        )
+
+        count = db_sync.load_rows_from_arrow_files([path])
+
+        assert count == 2
+
+    def test_load_rows_from_arrow_files_emits_a_record_count_metric(
+        self, tmp_path, local_connection, capsys
+    ):
+        db_sync = self._make_db_sync(local_connection, stream="mydb-mytable")
+        path = _write_arrow_ipc_file(
+            tmp_path, [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]
+        )
+
+        db_sync.load_rows_from_arrow_files([path])
+
+        metric_lines = [
+            line for line in capsys.readouterr().err.splitlines() if "METRIC:" in line
+        ]
+        assert len(metric_lines) == 1
+        payload = json.loads(metric_lines[0].split("METRIC:", 1)[1])
+        assert payload["type"] == "counter"
+        assert payload["metric"] == "record_count"
+        assert payload["value"] == 2
+        assert payload["tags"] == {"stream": "mydb-mytable"}
 
     def test_loads_rows_from_multiple_arrow_files(self, tmp_path, local_connection):
         db_sync = self._make_db_sync(local_connection)
@@ -486,6 +556,38 @@ class TestLoadRowsFromJsonFiles:
 
         rows = db_sync.query('SELECT * FROM "public"."mytable" ORDER BY id')
         assert [(r["id"], r["name"]) for r in rows] == [(1, "a"), (2, "b")]
+
+    def test_load_rows_from_json_files_returns_row_count(
+        self, tmp_path, local_connection
+    ):
+        db_sync = self._make_db_sync(local_connection)
+        path = _write_jsonl_file(
+            tmp_path, [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]
+        )
+
+        count = db_sync.load_rows_from_json_files([path])
+
+        assert count == 2
+
+    def test_load_rows_from_json_files_emits_a_record_count_metric(
+        self, tmp_path, local_connection, capsys
+    ):
+        db_sync = self._make_db_sync(local_connection, stream="mydb-mytable")
+        path = _write_jsonl_file(
+            tmp_path, [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]
+        )
+
+        db_sync.load_rows_from_json_files([path])
+
+        metric_lines = [
+            line for line in capsys.readouterr().err.splitlines() if "METRIC:" in line
+        ]
+        assert len(metric_lines) == 1
+        payload = json.loads(metric_lines[0].split("METRIC:", 1)[1])
+        assert payload["type"] == "counter"
+        assert payload["metric"] == "record_count"
+        assert payload["value"] == 2
+        assert payload["tags"] == {"stream": "mydb-mytable"}
 
     def test_loads_rows_from_a_gzip_compressed_jsonl_file(
         self, tmp_path, local_connection
