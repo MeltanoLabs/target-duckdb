@@ -9,6 +9,7 @@ import uuid
 from urllib.parse import urlparse
 
 from target_duckdb.logger import get_logger
+from target_duckdb.metrics import emit_metric
 
 
 # copied from inflection.camelize to eliminate a dependency
@@ -402,6 +403,8 @@ class DbSync:
         cur.execute(f"DROP TABLE {temp_table}")
         os.unlink(temp_file_csv)
 
+        emit_metric(self.logger, "counter", "record_count", count, {"stream": stream})
+
     def _check_batch_flattening_supported(self):
         """BATCH-sourced files carry their original (unflattened) column/property names --
         e.g. a nested `c_obj` object stays a single `c_obj` column -- but when
@@ -440,6 +443,9 @@ class DbSync:
         nothing upstream (the tap, or the pipeline runner) cleans them up otherwise. Deletion
         only happens after the full upsert succeeds, so a failure partway through a
         multi-file batch leaves every source file intact for a retry.
+
+        Returns:
+            The number of rows loaded (for the caller to report as a record_count metric).
         """
         self._check_batch_flattening_supported()
 
@@ -462,6 +468,8 @@ class DbSync:
                 [file_path],
             )
 
+        count = cur.execute(f"SELECT COUNT(*) FROM {temp_table}").fetchone()[0]
+
         if len(self.stream_schema_message["key_properties"]) > 0:
             cur.execute(self.update_from_temp_table(temp_table))
         cur.execute(self.insert_from_temp_table(temp_table))
@@ -475,14 +483,20 @@ class DbSync:
                     "Could not remove processed batch file %s: %s", file_path, exc
                 )
 
+        emit_metric(self.logger, "counter", "record_count", count, {"stream": stream})
+        return count
+
     def load_rows_from_arrow_files(self, file_paths):
         """Load one or more Arrow IPC files (from a Singer BATCH message's manifest,
         encoding.format == "arrow") directly into the target table via DuckDB's native
         `arrow` community extension -- no Python-side row materialization at all.
+
+        Returns:
+            The number of rows loaded.
         """
         self.conn.execute("INSTALL arrow FROM community")
         self.conn.execute("LOAD arrow")
-        self._load_rows_from_files_by_name(file_paths, "read_arrow(?)", "Arrow")
+        return self._load_rows_from_files_by_name(file_paths, "read_arrow(?)", "Arrow")
 
     def load_rows_from_json_files(self, file_paths, compression=None):
         """Load one or more newline-delimited JSON files (from a Singer BATCH message's
@@ -495,10 +509,17 @@ class DbSync:
         max_level=0. See `_check_batch_flattening_supported`: if flattening actually applies
         for this stream (max_level > 0 and the schema has nested properties), this raises
         instead of silently mismatching columns.
+
+        Returns:
+            The number of rows loaded.
         """
         duckdb_compression = "gzip" if compression == "gzip" else "uncompressed"
         table_function_sql = f"read_json(?, format='newline_delimited', compression='{duckdb_compression}')"
-        self._load_rows_from_files_by_name(file_paths, table_function_sql, "JSON")
+        return self._load_rows_from_files_by_name(
+            file_paths,
+            table_function_sql,
+            "JSON",
+        )
 
     # pylint: disable=duplicate-string-formatting-argument
     def insert_from_temp_table(self, temp_table):
