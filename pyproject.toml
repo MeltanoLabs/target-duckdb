@@ -31,6 +31,7 @@ test = [
 typing = [
     { include-group = "test" },
     "mypy>=1.19.1",
+    "pyarrow-stubs>=20.0.0.20260625",
     "ty>=0.0.17",
     "types-jsonschema>=4.26.0.20260202",
 ]

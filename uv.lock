@@ -489,6 +489,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pyarrow-stubs"
+version = "20.0.0.20260625"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyarrow" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ff/7d/a3eadf94131428ec61b44bc40a52acca2b093bf0f6a90a0596c44aa9fe62/pyarrow_stubs-20.0.0.20260625.tar.gz", hash = "sha256:cae81ae0900d0710e5b8a6271fef34ccfacb08663bb5f805d94f129baf13130e", size = 237707, upload-time = "2026-06-25T07:27:47.496Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/29/65/00bb68d5951a1b758646fd33bca1735aebb6d9ed7184f260e1c1d17e6d97/pyarrow_stubs-20.0.0.20260625-py3-none-any.whl", hash = "sha256:26d8b6c0fa9d61ae49ad70d59988d8b88e2fe022cd782dd3333bcd33e6066486", size = 235701, upload-time = "2026-06-25T07:27:48.793Z" },
+]
+
+[[package]]
 name = "pygments"
 version = "2.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -841,6 +853,7 @@ dev = [
     { name = "coverage" },
     { name = "mypy" },
     { name = "pyarrow" },
+    { name = "pyarrow-stubs" },
     { name = "pytest" },
     { name = "pytest-datadir" },
     { name = "python-dotenv" },
@@ -861,6 +874,7 @@ typing = [
     { name = "coverage" },
     { name = "mypy" },
     { name = "pyarrow" },
+    { name = "pyarrow-stubs" },
     { name = "pytest" },
     { name = "pytest-datadir" },
     { name = "python-dotenv" },
@@ -879,6 +893,7 @@ dev = [
     { name = "coverage", specifier = ">=7.13" },
     { name = "mypy", specifier = ">=1.19.1" },
     { name = "pyarrow", specifier = ">=17" },
+    { name = "pyarrow-stubs", specifier = ">=20.0.0.20260625" },
     { name = "pytest", specifier = ">=9" },
     { name = "pytest-datadir", specifier = ">=1.8.0" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
@@ -897,6 +912,7 @@ typing = [
     { name = "coverage", specifier = ">=7.13" },
     { name = "mypy", specifier = ">=1.19.1" },
     { name = "pyarrow", specifier = ">=17" },
+    { name = "pyarrow-stubs", specifier = ">=20.0.0.20260625" },
     { name = "pytest", specifier = ">=9" },
     { name = "pytest-datadir", specifier = ">=1.8.0" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
