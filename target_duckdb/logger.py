@@ -6,7 +6,7 @@ import os
 def get_logger(name="singer"):
     """Return a Logger instance to use in singer."""
     # Use custom logging config provided by environment variable
-    if "LOGGING_CONF_FILE" in os.environ and os.environ["LOGGING_CONF_FILE"]:
+    if os.environ.get("LOGGING_CONF_FILE"):
         path = os.environ["LOGGING_CONF_FILE"]
         logging.config.fileConfig(path, disable_existing_loggers=False)
     # Use the default logging conf that meets the singer specs criteria

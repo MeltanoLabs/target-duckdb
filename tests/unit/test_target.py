@@ -7,8 +7,9 @@ from unittest.mock import patch
 
 import duckdb
 import pyarrow as pa
-import pyarrow.ipc as ipc
 import pytest
+from pyarrow import ipc
+
 import target_duckdb
 
 RESOURCES = Path(__file__).parent / "resources"

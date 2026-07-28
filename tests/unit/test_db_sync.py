@@ -6,8 +6,8 @@ import os
 
 import duckdb
 import pyarrow as pa
-import pyarrow.ipc as ipc
 import pytest
+from pyarrow import ipc
 
 import target_duckdb
 from target_duckdb.db_sync import DbSync

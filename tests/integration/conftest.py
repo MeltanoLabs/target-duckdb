@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, TypeAlias, Callable
+from typing import Any, TypeAlias
 
 import duckdb
 import pytest

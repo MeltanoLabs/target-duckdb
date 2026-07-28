@@ -1,25 +1,24 @@
 from __future__ import annotations
 
-import json
 import datetime
+import json
 import unicodedata
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, TypeAlias
 from unittest import mock
 
 import duckdb
-import target_duckdb
-from typing import TypeAlias, Any, Callable
-
 import pytest
-
-from target_duckdb import RecordValidationException
-from target_duckdb.db_sync import DbSync
-
 from conftest import (
     assert_metadata_columns_exist,
     assert_metadata_columns_not_exist,
     remove_metadata_columns_from_rows,
 )
+
+import target_duckdb
+from target_duckdb import RecordValidationException
+from target_duckdb.db_sync import DbSync
 
 FileLoader: TypeAlias = Callable[[str], list[str]]
 
@@ -45,16 +44,16 @@ class TestIntegration:
         """
         # Get loaded rows from tables
         table_one = instance.query(
-            "SELECT * FROM {}.test_table_one ORDER BY c_pk".format(target_schema)
+            f"SELECT * FROM {target_schema}.test_table_one ORDER BY c_pk"
         )
         table_two = instance.query(
-            "SELECT * FROM {}.test_table_two ORDER BY c_pk".format(target_schema)
+            f"SELECT * FROM {target_schema}.test_table_two ORDER BY c_pk"
         )
         table_three = instance.query(
-            "SELECT * FROM {}.test_table_three ORDER BY c_pk".format(target_schema)
+            f"SELECT * FROM {target_schema}.test_table_three ORDER BY c_pk"
         )
         table_four = instance.query(
-            "SELECT * FROM {}.test_table_four ORDER BY c_pk".format(target_schema)
+            f"SELECT * FROM {target_schema}.test_table_four ORDER BY c_pk"
         )
 
         # ----------------------------------------------------------------------
@@ -208,18 +207,16 @@ class TestIntegration:
     ):
         # Get loaded rows from tables
         table_one = instance.query(
-            "SELECT * FROM {}.logical1_table1 ORDER BY cid".format(target_schema)
+            f"SELECT * FROM {target_schema}.logical1_table1 ORDER BY cid"
         )
         table_two = instance.query(
-            "SELECT * FROM {}.logical1_table2 ORDER BY cid".format(target_schema)
+            f"SELECT * FROM {target_schema}.logical1_table2 ORDER BY cid"
         )
         table_three = instance.query(
-            "SELECT * FROM {}.logical2_table1 ORDER BY cid".format(target_schema)
+            f"SELECT * FROM {target_schema}.logical2_table1 ORDER BY cid"
         )
         table_four = instance.query(
-            "SELECT cid, ctimentz, ctimetz FROM {}.logical1_edgydata WHERE CID IN(1,2,3,4,5,6,8,9) ORDER BY cid".format(
-                target_schema
-            )
+            f"SELECT cid, ctimentz, ctimetz FROM {target_schema}.logical1_edgydata WHERE CID IN(1,2,3,4,5,6,8,9) ORDER BY cid"
         )
 
         # ----------------------------------------------------------------------
@@ -310,18 +307,16 @@ class TestIntegration:
     ):
         # Get loaded rows from tables
         table_one = instance.query(
-            "SELECT * FROM {}.logical1_table1 ORDER BY CID".format(target_schema)
+            f"SELECT * FROM {target_schema}.logical1_table1 ORDER BY CID"
         )
         table_two = instance.query(
-            "SELECT * FROM {}.logical1_table2 ORDER BY CID".format(target_schema)
+            f"SELECT * FROM {target_schema}.logical1_table2 ORDER BY CID"
         )
         table_three = instance.query(
-            "SELECT * FROM {}.logical2_table1 ORDER BY CID".format(target_schema)
+            f"SELECT * FROM {target_schema}.logical2_table1 ORDER BY CID"
         )
         table_four = instance.query(
-            "SELECT * FROM {}.logical1_edgydata WHERE cid IN(1,2,3,4,5,6,8,9) ORDER BY cid".format(
-                target_schema
-            )
+            f"SELECT * FROM {target_schema}.logical1_edgydata WHERE cid IN(1,2,3,4,5,6,8,9) ORDER BY cid"
         )
 
         assert table_one == []
@@ -339,7 +334,7 @@ class TestIntegration:
         # Redshift doesn't have binary type. Binary formatted singer values loaded into VARCHAR columns
         # Get loaded rows from tables
         table_one = instance.query(
-            'SELECT * FROM {}.{} ORDER BY "new"'.format(target_schema, table_name)
+            f'SELECT * FROM {target_schema}.{table_name} ORDER BY "new"'
         )
 
         # ----------------------------------------------------------------------
@@ -566,7 +561,7 @@ class TestIntegration:
 
         # Get loaded rows from tables
         table_unicode = instance.query(
-            "SELECT * FROM {}.test_table_unicode ORDER BY c_pk".format(target_schema)
+            f"SELECT * FROM {target_schema}.test_table_unicode ORDER BY c_pk"
         )
 
         def normalize_rows(rows):
@@ -627,7 +622,7 @@ class TestIntegration:
 
         # Get loaded rows from tables
         table_long_texts = instance.query(
-            "SELECT * FROM {}.test_table_long_texts ORDER BY c_pk".format(target_schema)
+            f"SELECT * FROM {target_schema}.test_table_long_texts ORDER BY c_pk"
         )
 
         # Test not very long texts by exact match
@@ -684,9 +679,7 @@ class TestIntegration:
 
         # Get loaded rows from tables
         table_non_db_friendly_columns = instance.query(
-            "SELECT * FROM {}.test_table_non_db_friendly_columns ORDER BY c_pk".format(
-                target_schema
-            )
+            f"SELECT * FROM {target_schema}.test_table_non_db_friendly_columns ORDER BY c_pk"
         )
 
         assert remove_metadata_columns_from_rows(table_non_db_friendly_columns) == [
@@ -733,9 +726,7 @@ class TestIntegration:
 
         # Get loaded rows from tables - Transform JSON to string at query time
         unflattened_table = instance.query(
-            """SELECT * FROM {}.test_table_nested_schema ORDER BY c_pk""".format(
-                target_schema
-            )
+            f"""SELECT * FROM {target_schema}.test_table_nested_schema ORDER BY c_pk"""
         )
 
         # Should be valid nested JSON strings
@@ -778,9 +769,7 @@ class TestIntegration:
 
         # Get loaded rows from tables
         flattened_table = instance.query(
-            "SELECT * FROM {}.test_table_nested_schema ORDER BY c_pk".format(
-                target_schema
-            )
+            f"SELECT * FROM {target_schema}.test_table_nested_schema ORDER BY c_pk"
         )
 
         # Should be flattened columns
@@ -824,24 +813,24 @@ class TestIntegration:
 
         # Get loaded rows from tables
         table_one = instance.query(
-            "SELECT * FROM {}.test_table_one ORDER BY c_pk".format(target_schema)
+            f"SELECT * FROM {target_schema}.test_table_one ORDER BY c_pk"
         )
         table_two = instance.query(
-            "SELECT * FROM {}.test_table_two ORDER BY c_pk".format(target_schema)
+            f"SELECT * FROM {target_schema}.test_table_two ORDER BY c_pk"
         )
         table_three = instance.query(
-            "SELECT * FROM {}.test_table_three ORDER BY c_pk".format(target_schema)
+            f"SELECT * FROM {target_schema}.test_table_three ORDER BY c_pk"
         )
 
         # Get the previous column name from information schema in test_table_two
         previous_column_name = instance.query(
-            """
+            f"""
             SELECT column_name
               FROM information_schema.columns
-              WHERE table_schema = '{}'
+              WHERE table_schema = '{target_schema.lower()}'
                AND table_name = 'test_table_two'
                AND ordinal_position = 1
-            """.format(target_schema.lower())
+            """
         )[0]["column_name"]
 
         # Table one should have no changes

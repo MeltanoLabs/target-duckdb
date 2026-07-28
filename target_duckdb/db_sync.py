@@ -60,11 +60,11 @@ def column_type(schema_property):
 
 
 def safe_column_name(name):
-    return '"{}"'.format(name).lower()
+    return f'"{name}"'.lower()
 
 
 def column_clause(name, schema_property):
-    return "{} {}".format(safe_column_name(name), column_type(schema_property))
+    return f"{safe_column_name(name)} {column_type(schema_property)}"
 
 
 def flatten_key(k, parent_key, sep):
@@ -119,7 +119,7 @@ def flatten_schema(d, parent_key=[], sep="__", level=0, max_level=0):
     sorted_items = sorted(items, key=key_func)
     for k, g in itertools.groupby(sorted_items, key=key_func):
         if len(list(g)) > 1:
-            raise ValueError("Duplicate column name produced in schema: {}".format(k))
+            raise ValueError(f"Duplicate column name produced in schema: {k}")
 
     return dict(sorted_items)
 
@@ -290,9 +290,7 @@ class DbSync:
             if not self.schema_name:
                 raise Exception(
                     "Target schema name not defined in config. Neither 'default_target_schema' (string)"
-                    "nor 'schema_mapping' (object) defines target schema for {} stream.".format(
-                        stream_name
-                    )
+                    f"nor 'schema_mapping' (object) defines target schema for {stream_name} stream."
                 )
 
             self.data_flattening_max_level = self.connection_config.get(
@@ -392,9 +390,7 @@ class DbSync:
             for record in records:
                 csvwriter.writerow(self.record_to_flattened(record))
         cur.execute(
-            "COPY {} FROM '{}' WITH (HEADER false, new_line '\\r\\n')".format(
-                temp_table, temp_file_csv
-            )
+            f"COPY {temp_table} FROM '{temp_file_csv}' WITH (HEADER false, new_line '\\r\\n')"
         )
 
         if len(self.stream_schema_message["key_properties"]) > 0:
@@ -557,7 +553,7 @@ class DbSync:
         WHERE {}
         """.format(
             table,
-            ", ".join(["{}=t.{}".format(c, c) for c in columns]),
+            ", ".join([f"{c}=t.{c}" for c in columns]),
             temp_table,
             self.primary_key_condition("t"),
         )
@@ -565,12 +561,12 @@ class DbSync:
     def primary_key_condition(self, right_table):
         stream_schema_message = self.stream_schema_message
         names = primary_column_names(stream_schema_message)
-        return " AND ".join(["s.{} = {}.{}".format(c, right_table, c) for c in names])
+        return " AND ".join([f"s.{c} = {right_table}.{c}" for c in names])
 
     def primary_key_null_condition(self, right_table):
         stream_schema_message = self.stream_schema_message
         names = primary_column_names(stream_schema_message)
-        return " AND ".join(["{}.{} is null".format(right_table, c) for c in names])
+        return " AND ".join([f"{right_table}.{c} is null" for c in names])
 
     def column_names(self):
         return [safe_column_name(name) for name in self.flatten_schema]
@@ -611,9 +607,7 @@ class DbSync:
             table_without_schema[:30].replace(" ", "").replace('"', ""),
             column.replace(",", "_"),
         )
-        query = "CREATE INDEX IF NOT EXISTS {} ON {} ({})".format(
-            index_name, table, column
-        )
+        query = f"CREATE INDEX IF NOT EXISTS {index_name} ON {table} ({column})"
         self.logger.info(
             "Creating index on '%s' table on '%s' column(s)... %s", table, column, query
         )
@@ -626,9 +620,7 @@ class DbSync:
 
     def delete_rows(self, stream):
         table = self.table_name(stream)
-        query = "DELETE FROM {} WHERE _sdc_deleted_at IS NOT NULL RETURNING _sdc_deleted_at".format(
-            table
-        )
+        query = f"DELETE FROM {table} WHERE _sdc_deleted_at IS NOT NULL RETURNING _sdc_deleted_at"
         self.logger.info("Deleting rows from '%s' table... %s", table, query)
         self.logger.info("DELETE %s", len(self.query(query)))
 
@@ -719,9 +711,7 @@ class DbSync:
             self.add_column(column, stream)
 
     def drop_column(self, column_name, stream):
-        drop_column = "ALTER TABLE {} DROP COLUMN {}".format(
-            self.table_name(stream), column_name
-        )
+        drop_column = f"ALTER TABLE {self.table_name(stream)} DROP COLUMN {column_name}"
         self.logger.info("Dropping column: %s", drop_column)
         self.query(drop_column)
 
@@ -736,9 +726,7 @@ class DbSync:
         self.query(version_column)
 
     def add_column(self, column, stream):
-        add_column = "ALTER TABLE {} ADD COLUMN {}".format(
-            self.table_name(stream), column
-        )
+        add_column = f"ALTER TABLE {self.table_name(stream)} ADD COLUMN {column}"
         self.logger.info("Adding column: %s", add_column)
         self.query(add_column)
 

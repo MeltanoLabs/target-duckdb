@@ -83,7 +83,7 @@ def emit_state(state):
     if state is not None:
         line = json.dumps(state)
         LOGGER.debug("Emitting state %s", line)
-        sys.stdout.write("{}\n".format(line))
+        sys.stdout.write(f"{line}\n")
         sys.stdout.flush()
 
 
@@ -91,7 +91,7 @@ def batch_manifest_paths(manifest):
     """Strip the `file://` URI scheme off each entry in a BATCH message's manifest,
     returning plain local filesystem paths."""
     return [
-        path[len("file://") :] if path.startswith("file://") else path
+        path.removeprefix("file://")
         for path in manifest
     ]
 
@@ -158,13 +158,13 @@ def persist_lines(connection, config, lines) -> None:
             raise
 
         if "type" not in o:
-            raise Exception("Line is missing required key 'type': {}".format(line))
+            raise Exception(f"Line is missing required key 'type': {line}")
         t = o["type"]
 
         if t == "RECORD":
             if "stream" not in o:
                 raise Exception(
-                    "Line is missing required key 'stream': {}".format(line)
+                    f"Line is missing required key 'stream': {line}"
                 )
             if o["stream"] not in schemas:
                 raise Exception(
@@ -195,7 +195,7 @@ def persist_lines(connection, config, lines) -> None:
                 o["record"]
             )
             if not primary_key_string:
-                primary_key_string = "RID-{}".format(total_row_count[stream])
+                primary_key_string = f"RID-{total_row_count[stream]}"
 
             if stream not in records_to_load:
                 records_to_load[stream] = {}
@@ -247,7 +247,7 @@ def persist_lines(connection, config, lines) -> None:
         elif t == "SCHEMA":
             if "stream" not in o:
                 raise Exception(
-                    "Line is missing required key 'stream': {}".format(line)
+                    f"Line is missing required key 'stream': {line}"
                 )
             stream = o["stream"]
 
@@ -309,14 +309,12 @@ def persist_lines(connection, config, lines) -> None:
         elif t == "BATCH":
             if "stream" not in o:
                 raise Exception(
-                    "Line is missing required key 'stream': {}".format(line)
+                    f"Line is missing required key 'stream': {line}"
                 )
             stream = o["stream"]
             if stream not in schemas:
                 raise Exception(
-                    "A batch for stream {} was encountered before a corresponding schema".format(
-                        stream
-                    )
+                    f"A batch for stream {stream} was encountered before a corresponding schema"
                 )
 
             if config.get("add_metadata_columns") or config.get("hard_delete"):
@@ -345,10 +343,8 @@ def persist_lines(connection, config, lines) -> None:
 
             else:
                 raise Exception(
-                    "Unsupported BATCH encoding format '{}' for stream {} "
-                    "(only 'arrow' and 'jsonl' are supported)".format(
-                        batch_format, stream
-                    )
+                    f"Unsupported BATCH encoding format '{batch_format}' for stream {stream} "
+                    "(only 'arrow' and 'jsonl' are supported)"
                 )
 
         elif t == "ACTIVATE_VERSION":
