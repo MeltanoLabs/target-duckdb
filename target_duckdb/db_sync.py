@@ -8,6 +8,7 @@ import time
 import uuid
 from urllib.parse import urlparse
 
+from target_duckdb.exceptions import ConfigError
 from target_duckdb.logger import get_logger
 from target_duckdb.metrics import emit_metric
 
@@ -23,7 +24,7 @@ def camelize(string: str, uppercase_first_letter: bool = True) -> str:
 # pylint: disable=fixme
 def column_type(schema_property):
     property_type = schema_property["type"]
-    property_format = schema_property["format"] if "format" in schema_property else None
+    property_format = schema_property.get("format", None)
     col_type = "varchar"
     if "object" in property_type or "array" in property_type:
         col_type = "json"
@@ -72,7 +73,9 @@ def flatten_key(k, parent_key, sep):
 
 
 # pylint: disable=dangerous-default-value,invalid-name
-def flatten_schema(d, parent_key=[], sep="__", level=0, max_level=0):
+def flatten_schema(d, parent_key=None, sep="__", level=0, max_level=0):
+    if parent_key is None:
+        parent_key = []
     items = []
 
     if "properties" not in d:
@@ -80,7 +83,7 @@ def flatten_schema(d, parent_key=[], sep="__", level=0, max_level=0):
 
     for k, v in d["properties"].items():
         new_key = flatten_key(k, parent_key, sep)
-        if "type" in v.keys():
+        if "type" in v:
             if "object" in v["type"] and "properties" in v and level < max_level:
                 items.extend(
                     flatten_schema(
@@ -93,7 +96,7 @@ def flatten_schema(d, parent_key=[], sep="__", level=0, max_level=0):
                 )
             else:
                 items.append((new_key, v))
-        elif "anyOf" in v.keys():
+        elif "anyOf" in v:
             llv = v["anyOf"]
             i, entry = 0, llv[0]
             while entry["type"] == "null":
@@ -103,15 +106,15 @@ def flatten_schema(d, parent_key=[], sep="__", level=0, max_level=0):
             items.append((new_key, entry))
         else:
             if len(v.values()) > 0:
-                if list(v.values())[0][0]["type"] == "string":
-                    list(v.values())[0][0]["type"] = ["null", "string"]
-                    items.append((new_key, list(v.values())[0][0]))
-                elif list(v.values())[0][0]["type"] == "array":
-                    list(v.values())[0][0]["type"] = ["null", "array"]
-                    items.append((new_key, list(v.values())[0][0]))
-                elif list(v.values())[0][0]["type"] == "object":
-                    list(v.values())[0][0]["type"] = ["null", "object"]
-                    items.append((new_key, list(v.values())[0][0]))
+                if next(iter(v.values()))[0]["type"] == "string":
+                    next(iter(v.values()))[0]["type"] = ["null", "string"]
+                    items.append((new_key, next(iter(v.values()))[0]))
+                elif next(iter(v.values()))[0]["type"] == "array":
+                    next(iter(v.values()))[0]["type"] = ["null", "array"]
+                    items.append((new_key, next(iter(v.values()))[0]))
+                elif next(iter(v.values()))[0]["type"] == "object":
+                    next(iter(v.values()))[0]["type"] = ["null", "object"]
+                    items.append((new_key, next(iter(v.values()))[0]))
 
     def key_func(item):
         return item[0]
@@ -129,21 +132,20 @@ def _should_json_dump_value(key, value, flatten_schema=None):
     if isinstance(value, (dict, list)):
         return True
 
-    if (
+    return bool(
         flatten_schema
         and key in flatten_schema
         and "type" in flatten_schema[key]
         and set(flatten_schema[key]["type"]) == {"null", "object", "array"}
-    ):
-        return True
-
-    return False
+    )
 
 
 # pylint: disable-msg=too-many-arguments
 def flatten_record(
-    d, flatten_schema=None, parent_key=[], sep="__", level=0, max_level=0
+    d, flatten_schema=None, parent_key=None, sep="__", level=0, max_level=0
 ):
+    if parent_key is None:
+        parent_key = []
     items = []
     for k, v in d.items():
         new_key = flatten_key(k, parent_key, sep)
@@ -288,10 +290,11 @@ class DbSync:
                 self.schema_name = config_default_target_schema
 
             if not self.schema_name:
-                raise Exception(
+                msg = (
                     "Target schema name not defined in config. Neither 'default_target_schema' (string)"
                     f"nor 'schema_mapping' (object) defines target schema for {stream_name} stream."
                 )
+                raise ConfigError(msg)
 
             self.data_flattening_max_level = self.connection_config.get(
                 "data_flattening_max_level", 0
@@ -346,13 +349,13 @@ class DbSync:
             key_props = [
                 str(flatten[p]) for p in self.stream_schema_message["key_properties"]
             ]
-        except Exception as exc:
+        except Exception:
             self.logger.info(
                 "Cannot find %s primary key(s) in record: %s",
                 self.stream_schema_message["key_properties"],
                 flatten,
             )
-            raise exc
+            raise
         return ",".join(key_props)
 
     def record_to_flattened(self, record):
@@ -416,12 +419,13 @@ class DbSync:
         )
         flattened_names = set(self.flatten_schema.keys())
         if flattened_names != raw_property_names:
-            raise Exception(
+            msg = (
                 "data_flattening_max_level > 0 is not supported for BATCH-sourced streams "
-                "with nested object/array properties (stream {!r}). Set "
+                f"with nested object/array properties (stream {stream_schema_message['stream']!r}). Set "
                 "data_flattening_max_level=0 (the default) for this stream, or disable "
-                "BATCH mode for it.".format(stream_schema_message["stream"])
+                "BATCH mode for it."
             )
+            raise ConfigError(msg)
 
     def _load_rows_from_files_by_name(self, file_paths, table_function_sql, log_label):
         """Shared implementation for loading BATCH manifest files directly into the target
