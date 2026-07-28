@@ -23,6 +23,7 @@ lint = [
 ]
 test = [
     "coverage>=7.13",
+    "duckdb==1.5.4",  # Bump only after MotherDuck adds support for the new version: https://motherduck.com/docs/about-motherduck/release-notes/
     "pytest>=9",
     "pytest-datadir>=1.8.0",
     "python-dotenv>=1.2.1",
