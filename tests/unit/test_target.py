@@ -11,6 +11,7 @@ import pytest
 from pyarrow import ipc
 
 import target_duckdb
+from target_duckdb.exceptions import InvalidSingerMessageError
 
 RESOURCES = Path(__file__).parent / "resources"
 
@@ -170,5 +171,8 @@ def test_persist_lines_unsupported_batch_encoding_raises(
         _batch_line(stream, ["file:///tmp/whatever.parquet"], {"format": "parquet"}),
     ]
 
-    with pytest.raises(Exception, match="Unsupported BATCH encoding format"):
+    with pytest.raises(
+        InvalidSingerMessageError,
+        match="Unsupported BATCH encoding format",
+    ):
         target_duckdb.persist_lines(connection, config, lines)

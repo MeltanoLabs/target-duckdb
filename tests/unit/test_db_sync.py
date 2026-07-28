@@ -11,6 +11,7 @@ from pyarrow import ipc
 
 import target_duckdb
 from target_duckdb.db_sync import DbSync
+from target_duckdb.exceptions import ConfigError
 
 
 def test_config_validation():
@@ -515,7 +516,7 @@ class TestLoadRowsFromArrowFiles:
         db_sync.sync_table()
 
         path = _write_arrow_ipc_file(tmp_path, [{"id": 1, "name": "a"}])
-        with pytest.raises(Exception, match="data_flattening_max_level"):
+        with pytest.raises(ConfigError, match="data_flattening_max_level"):
             db_sync.load_rows_from_arrow_files([path])
 
         assert os.path.exists(path)
@@ -692,7 +693,7 @@ class TestLoadRowsFromJsonFiles:
         db_sync.sync_table()
 
         path = _write_jsonl_file(tmp_path, [{"id": 1, "c_obj": {"nested_prop1": "x"}}])
-        with pytest.raises(Exception, match="data_flattening_max_level"):
+        with pytest.raises(ConfigError, match="data_flattening_max_level"):
             db_sync.load_rows_from_json_files([path])
 
         assert os.path.exists(path)
@@ -733,7 +734,7 @@ class TestBatchFlatteningGuard:
         db_sync.sync_table()
 
         path = _write_arrow_ipc_file(tmp_path, [{"id": 1, "name": "a"}])
-        with pytest.raises(Exception, match="data_flattening_max_level"):
+        with pytest.raises(ConfigError, match="data_flattening_max_level"):
             db_sync.load_rows_from_arrow_files([path])
 
     def test_json_raises_when_flattening_applies(self, tmp_path, local_connection):
@@ -745,7 +746,7 @@ class TestBatchFlatteningGuard:
         db_sync.sync_table()
 
         path = _write_jsonl_file(tmp_path, [{"id": 1, "c_obj": {"nested_prop1": "x"}}])
-        with pytest.raises(Exception, match="data_flattening_max_level"):
+        with pytest.raises(ConfigError, match="data_flattening_max_level"):
             db_sync.load_rows_from_json_files([path])
 
     def test_does_not_raise_when_max_level_is_zero_despite_nested_schema(

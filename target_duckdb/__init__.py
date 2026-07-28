@@ -6,7 +6,7 @@ import io
 import json
 import sys
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -14,6 +14,10 @@ import duckdb
 from jsonschema import Draft7Validator, FormatChecker
 
 from target_duckdb.db_sync import DbSync
+from target_duckdb.exceptions import (
+    InvalidSingerMessageError,
+    SingerMessagesOutOfOrderError,
+)
 from target_duckdb.logger import get_logger
 
 LOGGER = get_logger("target_duckdb")
@@ -69,7 +73,7 @@ def add_metadata_values_to_record(record_message):
     """
     extended_record = record_message["record"]
     extended_record["_sdc_extracted_at"] = record_message.get("time_extracted")
-    extended_record["_sdc_batched_at"] = datetime.now().isoformat()
+    extended_record["_sdc_batched_at"] = datetime.now(tz=timezone.utc).isoformat()
     extended_record["_sdc_deleted_at"] = record_message.get("record", {}).get(
         "_sdc_deleted_at"
     )
@@ -90,10 +94,7 @@ def emit_state(state):
 def batch_manifest_paths(manifest):
     """Strip the `file://` URI scheme off each entry in a BATCH message's manifest,
     returning plain local filesystem paths."""
-    return [
-        path.removeprefix("file://")
-        for path in manifest
-    ]
+    return [path.removeprefix("file://") for path in manifest]
 
 
 # pylint: disable=missing-function-docstring,missing-class-docstring
@@ -158,20 +159,19 @@ def persist_lines(connection, config, lines) -> None:
             raise
 
         if "type" not in o:
-            raise Exception(f"Line is missing required key 'type': {line}")
+            raise InvalidSingerMessageError(
+                f"Line is missing required key 'type': {line}"
+            )
         t = o["type"]
 
         if t == "RECORD":
             if "stream" not in o:
-                raise Exception(
+                raise InvalidSingerMessageError(
                     f"Line is missing required key 'stream': {line}"
                 )
             if o["stream"] not in schemas:
-                raise Exception(
-                    "A record for stream {} was encountered before a corresponding schema".format(
-                        o["stream"]
-                    )
-                )
+                msg = f"A record for stream {o['stream']} was encountered before a corresponding schema"
+                raise SingerMessagesOutOfOrderError(msg)
 
             # Get schema for this record's stream
             stream = o["stream"]
@@ -246,7 +246,7 @@ def persist_lines(connection, config, lines) -> None:
 
         elif t == "SCHEMA":
             if "stream" not in o:
-                raise Exception(
+                raise InvalidSingerMessageError(
                     f"Line is missing required key 'stream': {line}"
                 )
             stream = o["stream"]
@@ -273,7 +273,7 @@ def persist_lines(connection, config, lines) -> None:
 
             # key_properties key must be available in the SCHEMA message.
             if "key_properties" not in o:
-                raise Exception("key_properties field is required")
+                raise InvalidSingerMessageError("key_properties field is required")
 
             # Log based and Incremental replications on tables with no Primary Key
             # cause duplicates when merging UPDATE events.
@@ -289,7 +289,7 @@ def persist_lines(connection, config, lines) -> None:
                     "Primary key is set to mandatory but not defined in the [%s] stream",
                     stream,
                 )
-                raise Exception("key_properties field is required")
+                raise InvalidSingerMessageError("key_properties field is required")
 
             key_properties[stream] = o["key_properties"]
 
@@ -308,14 +308,13 @@ def persist_lines(connection, config, lines) -> None:
 
         elif t == "BATCH":
             if "stream" not in o:
-                raise Exception(
+                raise InvalidSingerMessageError(
                     f"Line is missing required key 'stream': {line}"
                 )
             stream = o["stream"]
             if stream not in schemas:
-                raise Exception(
-                    f"A batch for stream {stream} was encountered before a corresponding schema"
-                )
+                msg = f"A batch for stream {stream} was encountered before a corresponding schema"
+                raise SingerMessagesOutOfOrderError(msg)
 
             if config.get("add_metadata_columns") or config.get("hard_delete"):
                 LOGGER.warning(
@@ -342,10 +341,11 @@ def persist_lines(connection, config, lines) -> None:
                 )
 
             else:
-                raise Exception(
+                msg = (
                     f"Unsupported BATCH encoding format '{batch_format}' for stream {stream} "
                     "(only 'arrow' and 'jsonl' are supported)"
                 )
+                raise InvalidSingerMessageError(msg)
 
         elif t == "ACTIVATE_VERSION":
             LOGGER.debug("ACTIVATE_VERSION message")
@@ -355,9 +355,8 @@ def persist_lines(connection, config, lines) -> None:
                 flushed_state = copy.deepcopy(state)
 
         else:
-            raise Exception(
-                "Unknown message type {} in message {}".format(o["type"], o)
-            )
+            msg = f"Unknown message type {o['type']} in message {o}"
+            raise InvalidSingerMessageError(msg)
 
     # if some bucket has records that need to be flushed but haven't reached batch size
     # then flush all buckets.

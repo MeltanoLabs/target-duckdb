@@ -19,6 +19,7 @@ from conftest import (
 import target_duckdb
 from target_duckdb import RecordValidationException
 from target_duckdb.db_sync import DbSync
+from target_duckdb.exceptions import SingerMessagesOutOfOrderError
 
 FileLoader: TypeAlias = Callable[[str], list[str]]
 
@@ -73,13 +74,13 @@ class TestIntegration:
                     "c_int": 1,
                     "c_pk": 1,
                     "c_varchar": "1",
-                    "c_date": datetime.datetime(2019, 2, 1, 15, 12, 45),
+                    "c_date": datetime.datetime(2019, 2, 1, 15, 12, 45),  # noqa: DTZ001
                 },
                 {
                     "c_int": 2,
                     "c_pk": 2,
                     "c_varchar": "2",
-                    "c_date": datetime.datetime(2019, 2, 10, 2, 0, 0),
+                    "c_date": datetime.datetime(2019, 2, 10, 2, 0, 0),  # noqa: DTZ001
                 },
             ]
         else:
@@ -88,7 +89,7 @@ class TestIntegration:
                     "c_int": 2,
                     "c_pk": 2,
                     "c_varchar": "2",
-                    "c_date": datetime.datetime(2019, 2, 10, 2, 0, 0),
+                    "c_date": datetime.datetime(2019, 2, 10, 2, 0, 0),  # noqa: DTZ001
                 }
             ]
 
@@ -344,12 +345,12 @@ class TestIntegration:
             {
                 "new": "706b32",
                 "data": "6461746132",
-                "created_at": datetime.datetime(2019, 12, 17, 16, 2, 55),
+                "created_at": datetime.datetime(2019, 12, 17, 16, 2, 55),  # noqa: DTZ001
             },
             {
                 "new": "706b34",
                 "data": "6461746134",
-                "created_at": datetime.datetime(2019, 12, 17, 16, 32, 22),
+                "created_at": datetime.datetime(2019, 12, 17, 16, 32, 22),  # noqa: DTZ001
             },
         ]
 
@@ -377,7 +378,10 @@ class TestIntegration:
     ):
         """RECORD message without a previously received SCHEMA message should raise an exception"""
         tap_lines = get_test_tap_lines("invalid-message-order.json")
-        with pytest.raises(Exception):
+        with pytest.raises(
+            SingerMessagesOutOfOrderError,
+            match=r"A record for stream \w+-\w+ was encountered before a corresponding schema",
+        ):
             target_duckdb.persist_lines(connection, config, tap_lines)
 
     def test_loading_tables(
@@ -841,14 +845,14 @@ class TestIntegration:
         # Table two should have versioned column
         assert remove_metadata_columns_from_rows(table_two) == [
             {
-                previous_column_name: datetime.datetime(2019, 2, 1, 15, 12, 45),
+                previous_column_name: datetime.datetime(2019, 2, 1, 15, 12, 45),  # noqa: DTZ001
                 "c_int": 1,
                 "c_pk": 1,
                 "c_varchar": "1",
                 "c_date": None,
             },
             {
-                previous_column_name: datetime.datetime(2019, 2, 10, 2),
+                previous_column_name: datetime.datetime(2019, 2, 10, 2),  # noqa: DTZ001
                 "c_int": 2,
                 "c_pk": 2,
                 "c_varchar": "2",
@@ -1668,7 +1672,7 @@ class TestIntegration:
             )
 
         # Loading invalid records when record validation disabled should fail at load time
-        with pytest.raises(Exception):
+        with pytest.raises(Exception, match="Conversion Error"):
             target_duckdb.persist_lines(
                 connection,
                 {**config, "validate_records": False},
