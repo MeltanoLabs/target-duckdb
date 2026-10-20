@@ -23,7 +23,7 @@ lint = [
 ]
 test = [
     "coverage>=7.13",
-    "duckdb==1.5.5",  # Bump only after MotherDuck adds support for the new version: https://motherduck.com/docs/about-motherduck/release-notes/
+    "duckdb==1.5.6",  # Bump only after MotherDuck adds support for the new version: https://motherduck.com/docs/about-motherduck/release-notes/
     "pytest>=9",
     "pytest-datadir>=1.8.0",
     "python-dotenv>=1.2.1",
@@ -66,12 +66,14 @@ env_list = [
 ]
 
 [tool.tox.env_run_base]
+description = "Run the full test suite"
 runner = "uv-venv-lock-runner"
 pass_env = [ "MOTHERDUCK_TOKEN" ]
 dependency_groups = [ "test" ]
 commands = [ [ "pytest" ] ]
 
 [tool.tox.env.lint]
+description = "Check linting and formatting with ruff"
 dependency_groups = [ "lint" ]
 commands = [
     [ "ruff", "check", "target_duckdb", "tests" ],
@@ -79,16 +81,19 @@ commands = [
 ]
 
 [tool.tox.env.unit]
+description = "Run unit tests"
 commands = [ [ "pytest", "tests/unit" ] ]
 
 [tool.tox.env.integration]
+description = "Run integration tests against MotherDuck (requires MOTHERDUCK_TOKEN)"
 commands = [ [ "pytest", "tests/integration" ] ]
 
 [tool.tox.env.typing]
+description = "Check types with mypy"
 dependency_groups = [ "typing" ]
 commands = [
   [ "mypy", "target_duckdb", "tests" ],
-#   [ "ty", "check", "target_duckdb", "tests" ],
+  [ "ty", "check", "target_duckdb", "tests" ],
 ]
 
 [tool.tox.gh.python]

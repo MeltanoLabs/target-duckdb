@@ -39,7 +39,7 @@ with either encoding:
 
 Both paths load each manifest file directly via `INSERT INTO ... BY NAME SELECT * FROM
 read_json(...)`/`read_arrow(...)` — there's no Python-side row-by-row materialization, unlike
-RECORD-mode's CSV-based loading. The `arrow` extension is fetched automatically the first time
+RECORD-mode's JSONL-based loading. The `arrow` extension is fetched automatically the first time
 an Arrow BATCH message is processed (`INSTALL arrow FROM community`), so the environment running
 this target needs network access at least once; it's cached locally afterwards.
 
@@ -77,8 +77,6 @@ Additional options in `config.json`:
 | path (alias: filepath)              | String  | Yes        | The path to use for the `duckdb.connect` call; either a local file or a MotherDuck connection uri. |
 | dbname (alias: database)            | String  |            | The database name to write to; this will be inferred from the path property if it is not specified. |
 | token                               | String  |            | For MotherDuck connections, the auth token to use (this may also be set directly via the MOTHERDUCK_TOKEN environment variable. |
-| delimiter                           | String  |            | (Default: ',') The delimiter to use for the CSV files that are used for record imports. |
-| quotechar                           | String  |            | (Default: '"') The quote character to use for the CSV files that are used for record imports. |
 | batch_size_rows                     | Integer |            | (Default: 100000) Maximum number of rows in each batch. At the end of each batch, the rows in the batch are loaded into DuckDB. |
 | flush_all_streams                   | Boolean |            | (Default: False) Flush and load every stream into DuckDB when one batch is full. Warning: This may trigger the COPY command to use files with low number of records. |
 | default_target_schema               | String  |            | Name of the schema where the tables will be created. If `schema_mapping` is not defined then every stream sent by the tap is loaded into this schema.    |
@@ -88,7 +86,7 @@ Additional options in `config.json`:
 | data_flattening_max_level           | Integer |            | (Default: 0) Object type RECORD items from taps can be transformed to flattened columns by creating columns automatically.<br><br>When value is 0 (default) then flattening functionality is turned off. Not supported for BATCH-sourced streams with nested properties when set above 0 (see [BATCH message support](#batch-message-support)). |
 | primary_key_required                | Boolean |            | (Default: True) Log based and Incremental replications on tables with no Primary Key cause duplicates when merging UPDATE events. When set to true, stop loading data if no Primary Key is defined. |
 | validate_records                    | Boolean |            | (Default: False) Validate every single record message to the corresponding JSON schema. This option is disabled by default and invalid RECORD messages will fail only at load time by DuckDB. Enabling this option will detect invalid records earlier but could cause performance degradation. |
-| temp_dir                            | String  |            | (Default: platform-dependent) Directory of temporary CSV files with RECORD messages. |
+| temp_dir                            | String  |            | (Default: platform-dependent) Directory of temporary JSONL files with RECORD messages. |
 
 ### Running Tests
 
