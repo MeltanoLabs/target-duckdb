@@ -1,6 +1,9 @@
 Unreleased
 ----------
 
+0.12.0 (2026-10-20)
+-------------------
+
 - RECORD messages are now loaded through temporary JSONL files and DuckDB's native `read_json`, instead of CSV files. This fixes type and quoting problems and adds no new dependency
 - Nested objects/arrays are written as native JSON values, so they are no longer double-encoded in `JSON` columns
 - Removes the `delimiter` and `quotechar` settings, which only applied to CSV temp files
