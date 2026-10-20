@@ -24,6 +24,11 @@ from target_duckdb.exceptions import SingerMessagesOutOfOrderError
 FileLoader: TypeAlias = Callable[[str], list[str]]
 
 
+def compact_json(value: Any) -> str:
+    """Serialize like DuckDB's `JSON` type does (no whitespace after separators)."""
+    return json.dumps(value, separators=(",", ":"))
+
+
 @pytest.mark.usefixtures("prepare")
 class TestIntegration:
     """
@@ -737,10 +742,10 @@ class TestIntegration:
         assert remove_metadata_columns_from_rows(unflattened_table) == [
             {
                 "c_pk": 1,
-                "c_array": json.dumps([1, 2, 3]),
-                "c_object": json.dumps({"key_1": "value_1"}),
-                "c_object_with_props": json.dumps({"key_1": "value_1"}),
-                "c_nested_object": json.dumps(
+                "c_array": compact_json([1, 2, 3]),
+                "c_object": compact_json({"key_1": "value_1"}),
+                "c_object_with_props": compact_json({"key_1": "value_1"}),
+                "c_nested_object": compact_json(
                     {
                         "nested_prop_1": "nested_value_1",
                         "nested_prop_2": "nested_value_2",
@@ -780,7 +785,7 @@ class TestIntegration:
         assert remove_metadata_columns_from_rows(flattened_table) == [
             {
                 "c_pk": 1,
-                "c_array": json.dumps([1, 2, 3]),
+                "c_array": compact_json([1, 2, 3]),
                 "c_object": None,
                 # Cannot map RECORD to SCHEMA. SCHEMA doesn't have properties that requires for flattening
                 "c_object_with_props__key_1": "value_1",
@@ -1672,7 +1677,7 @@ class TestIntegration:
             )
 
         # Loading invalid records when record validation disabled should fail at load time
-        with pytest.raises(Exception, match="Conversion Error"):
+        with pytest.raises(Exception, match="Failed to cast value"):
             target_duckdb.persist_lines(
                 connection,
                 {**config, "validate_records": False},

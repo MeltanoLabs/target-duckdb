@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import json
 import os
+from typing import Any
 
 import duckdb
 import pyarrow as pa
@@ -18,7 +19,7 @@ def test_config_validation():
     """Test configuration validator"""
     validator = target_duckdb.validate_config
     empty_config = {}
-    minimal_config = {
+    minimal_config: dict[str, Any] = {
         "filepath": "dummy-value",
         "default_target_schema": "dummy-value",
     }
@@ -782,3 +783,47 @@ class TestBatchFlatteningGuard:
 
         rows = db_sync.query('SELECT * FROM "public"."flatalready"')
         assert rows == [{"id": 1, "name": "a"}]
+
+
+class TestLoadRowsTypes:
+    def test_load_rows_handles_quotes_newlines_and_nested_values(
+        self, tmp_path, local_connection
+    ):
+        stream = "mydb-typed"
+        schema_message = {
+            "type": "SCHEMA",
+            "stream": stream,
+            "schema": {
+                "properties": {
+                    "id": {"type": ["integer"], "maximum": 2147483647},
+                    "txt": {"type": ["null", "string"]},
+                    "obj": {"type": ["null", "object"]},
+                    "ts": {"type": ["null", "string"], "format": "date-time"},
+                }
+            },
+            "key_properties": ["id"],
+        }
+        db_sync = DbSync(
+            local_connection, {"default_target_schema": "public"}, schema_message
+        )
+        db_sync.create_schema_if_not_exists()
+        db_sync.sync_table()
+        records = [
+            {
+                "id": 1,
+                "txt": 'a,"b"\nc',
+                "obj": {"x": [1, 2]},
+                "ts": "2020-01-01T00:00:00",
+            },
+            {"id": 2, "txt": None, "obj": None, "ts": None},
+        ]
+
+        db_sync.load_rows(records, len(records), str(tmp_path))
+
+        rows = local_connection.execute(
+            "SELECT id, txt, obj::VARCHAR, ts IS NULL FROM public.typed ORDER BY id"
+        ).fetchall()
+        assert rows == [
+            (1, 'a,"b"\nc', '{"x":[1,2]}', False),
+            (2, None, None, True),
+        ]

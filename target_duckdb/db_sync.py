@@ -1,11 +1,11 @@
 import collections.abc
-import csv
 import itertools
 import json
 import os
 import re
 import time
 import uuid
+from typing import Any
 from urllib.parse import urlparse
 
 from target_duckdb.exceptions import ConfigError
@@ -142,7 +142,13 @@ def _should_json_dump_value(key, value, flatten_schema=None):
 
 # pylint: disable-msg=too-many-arguments
 def flatten_record(
-    d, flatten_schema=None, parent_key=None, sep="__", level=0, max_level=0
+    d,
+    flatten_schema=None,
+    parent_key=None,
+    sep="__",
+    level=0,
+    max_level=0,
+    dump_json=True,
 ):
     if parent_key is None:
         parent_key = []
@@ -158,6 +164,7 @@ def flatten_record(
                     sep=sep,
                     level=level + 1,
                     max_level=max_level,
+                    dump_json=dump_json,
                 ).items()
             )
         else:
@@ -165,7 +172,7 @@ def flatten_record(
                 (
                     new_key,
                     json.dumps(v)
-                    if _should_json_dump_value(k, v, flatten_schema)
+                    if dump_json and _should_json_dump_value(k, v, flatten_schema)
                     else v,
                 )
             )
@@ -231,7 +238,7 @@ class DbSync:
         """
         self.conn = connection
         self.connection_config = connection_config
-        self.stream_schema_message = stream_schema_message
+        self.stream_schema_message: Any = stream_schema_message
 
         # logger to be used across the class's methods
         self.logger = get_logger("target_duckdb")
@@ -243,7 +250,7 @@ class DbSync:
             self.catalog_name = self.connection_config.get("dbname")
         else:
             self.catalog_name = get_catalog_name(self.connection_config)
-        self.schema_name = None
+        self.schema_name: Any = None
 
         # Init stream schema
         if stream_schema_message is not None:
@@ -304,10 +311,6 @@ class DbSync:
                 max_level=self.data_flattening_max_level,
             )
 
-            # Delimiters/quotechars for CSV temp files
-            self.delimiter = self.connection_config.get("delimiter", ",")
-            self.quotechar = self.connection_config.get("quotechar", '"')
-
     def query(self, query, params=None):
         self.logger.debug("Running query: %s", query)
         cur = self.conn
@@ -359,16 +362,29 @@ class DbSync:
         return ",".join(key_props)
 
     def record_to_flattened(self, record):
+        # Nested values stay native so they serialize as JSON values, not JSON strings
         flatten = flatten_record(
-            record, self.flatten_schema, max_level=self.data_flattening_max_level
+            record,
+            self.flatten_schema,
+            max_level=self.data_flattening_max_level,
+            dump_json=False,
         )
 
-        return [
-            flatten[name]
+        return {
+            safe_column_name(name).strip('"'): flatten[name]
             if name in flatten and (flatten[name] == 0 or flatten[name])
             else None
             for name in self.flatten_schema
-        ]
+        }
+
+    def _json_columns_sql(self):
+        """Explicit `read_json` column types, so values are cast to the target types
+        rather than inferred from the sampled rows."""
+        entries = []
+        for name, schema in self.flatten_schema.items():
+            key = safe_column_name(name).strip('"').replace("'", "''")
+            entries.append(f"'{key}': '{column_type(schema).upper()}'")
+        return "{" + ", ".join(entries) + "}"
 
     def load_rows(self, records, count, temp_dir):
         stream_schema_message = self.stream_schema_message
@@ -379,28 +395,31 @@ class DbSync:
 
         cur = self.conn
         temp_table = self.table_name(stream_schema_message["stream"], is_temporary=True)
-        temp_file_csv = os.path.join(temp_dir, f"{temp_table}.csv")
+        temp_file_jsonl = os.path.join(temp_dir, f"{temp_table}.jsonl")
         cur.execute(self.create_table_query(table_name=temp_table, is_temporary=True))
 
-        # batch the records into a CSV file and do a copy operation
-        with open(temp_file_csv, "w") as f:
-            csvwriter = csv.writer(
-                f,
-                delimiter=self.delimiter,
-                quotechar=self.quotechar,
-                quoting=csv.QUOTE_MINIMAL,
-            )
+        # batch the records into a JSONL file and load it with DuckDB's native reader
+        with open(temp_file_jsonl, "w", encoding="utf-8") as f:
             for record in records:
-                csvwriter.writerow(self.record_to_flattened(record))
+                f.write(
+                    json.dumps(
+                        self.record_to_flattened(record),
+                        default=str,
+                        ensure_ascii=False,
+                    )
+                )
+                f.write("\n")
         cur.execute(
-            f"COPY {temp_table} FROM '{temp_file_csv}' WITH (HEADER false, new_line '\\r\\n')"
+            f"INSERT INTO {temp_table} BY NAME SELECT * FROM "
+            f"read_json(?, format='newline_delimited', columns={self._json_columns_sql()})",
+            [temp_file_jsonl],
         )
 
         if len(self.stream_schema_message["key_properties"]) > 0:
             cur.execute(self.update_from_temp_table(temp_table))
         cur.execute(self.insert_from_temp_table(temp_table))
         cur.execute(f"DROP TABLE {temp_table}")
-        os.unlink(temp_file_csv)
+        os.unlink(temp_file_jsonl)
 
         emit_metric(self.logger, "counter", "record_count", count, {"stream": stream})
 
