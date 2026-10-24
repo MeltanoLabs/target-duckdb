@@ -78,7 +78,7 @@ dependency_groups = [ "test" ]
 commands = [ [ "pytest" ] ]
 
 [tool.tox.env.lint]
-description = "Check linting and formatting with ruff"
+description = "Check code style and formatting with Ruff"
 dependency_groups = [ "lint" ]
 commands = [
     [ "ruff", "check", "target_duckdb", "tests" ],
@@ -86,8 +86,11 @@ commands = [
 ]
 
 [tool.tox.env.unit]
-description = "Run unit tests"
+description = "Run unit tests against the latest DuckDB pre-release"
 commands = [ [ "pytest", "tests/unit" ] ]
+dependencies = [
+    "duckdb>=2.0.0.dev0",
+]
 
 [tool.tox.env.integration]
 description = "Run integration tests against MotherDuck (requires MOTHERDUCK_TOKEN)"
