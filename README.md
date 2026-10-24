@@ -33,14 +33,14 @@ with either encoding:
 
 - `encoding.format: "jsonl"` (optionally `encoding.compression: "gzip"`) — loaded via DuckDB's
   native [`read_json`](https://duckdb.org/docs/data/json/overview.html) table function.
-- `encoding.format: "arrow"` — loaded via DuckDB's native
-  [`arrow` community extension](https://duckdb.org/community_extensions/extensions/arrow.html)
+- `encoding.format: "arrow"` — loaded via the
+  [`nanoarrow` community extension](https://github.com/duckdb/duckdb-nanoarrow)
   (`read_arrow`).
 
 Both paths load each manifest file directly via `INSERT INTO ... BY NAME SELECT * FROM
 read_json(...)`/`read_arrow(...)` — there's no Python-side row-by-row materialization, unlike
-RECORD-mode's JSONL-based loading. The `arrow` extension is fetched automatically the first time
-an Arrow BATCH message is processed (`INSTALL arrow FROM community`), so the environment running
+RECORD-mode's JSONL-based loading. The `nanoarrow` extension is fetched automatically the first time
+an Arrow BATCH message is processed (`INSTALL nanoarrow FROM community`), so the environment running
 this target needs network access at least once; it's cached locally afterwards.
 
 Manifest files are deleted from disk once their data has been durably loaded into the target

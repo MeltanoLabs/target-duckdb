@@ -507,14 +507,14 @@ class DbSync:
 
     def load_rows_from_arrow_files(self, file_paths):
         """Load one or more Arrow IPC files (from a Singer BATCH message's manifest,
-        encoding.format == "arrow") directly into the target table via DuckDB's native
-        `arrow` community extension -- no Python-side row materialization at all.
+        encoding.format == "arrow") directly into the target table via the `nanoarrow`
+        community extension -- no Python-side row materialization at all.
 
         Returns:
             The number of rows loaded.
         """
-        self.conn.execute("INSTALL arrow FROM community")
-        self.conn.execute("LOAD arrow")
+        self.conn.execute("INSTALL nanoarrow FROM community")
+        self.conn.execute("LOAD nanoarrow")
         return self._load_rows_from_files_by_name(file_paths, "read_arrow(?)", "Arrow")
 
     def load_rows_from_json_files(self, file_paths, compression=None):
