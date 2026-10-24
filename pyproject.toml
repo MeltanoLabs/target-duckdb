@@ -51,6 +51,11 @@ build-backend = "hatchling.build"
 fallback-version = "0.0.0.dev0"
 source = "vcs"
 
+[tool.pyrefly]
+# pytest's default import mode puts the test directory on `sys.path`, so integration tests
+# import `conftest` as a top-level module.
+search-path = [ ".", "tests/integration" ]
+
 [tool.pytest]
 addopts = [ "-v" ]
 minversion = "9"

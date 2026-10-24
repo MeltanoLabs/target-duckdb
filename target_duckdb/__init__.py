@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import argparse
 import copy
 import io
@@ -8,7 +10,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import duckdb
 from jsonschema import Draft7Validator, FormatChecker
@@ -19,6 +21,9 @@ from target_duckdb.exceptions import (
     SingerMessagesOutOfOrderError,
 )
 from target_duckdb.logger import get_logger
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 LOGGER = get_logger("target_duckdb")
 
@@ -45,7 +50,7 @@ def float_to_decimal(value):
     return value
 
 
-def add_metadata_columns_to_schema(schema_message):
+def add_metadata_columns_to_schema(schema_message: dict[str, Any]) -> dict[str, Any]:
     """Metadata _sdc columns according to the stitch documentation at
     https://www.stitchdata.com/docs/data-structure/integration-schemas#sdc-columns
 
@@ -137,7 +142,11 @@ def duckdb_connect(config):
 
 
 # pylint: disable=too-many-locals,too-many-branches,too-many-statements,invalid-name,consider-iterating-dictionary
-def persist_lines(connection, config, lines) -> None:
+def persist_lines(
+    connection: duckdb.DuckDBPyConnection,
+    config: dict[str, Any],
+    lines: Iterable[str],
+) -> None:
     """Read singer messages and process them line by line"""
     state: dict[str, Any] | None = None
     flushed_state: dict[str, Any] | None = None
@@ -295,7 +304,9 @@ def persist_lines(connection, config, lines) -> None:
 
             if config.get("add_metadata_columns") or config.get("hard_delete"):
                 stream_to_sync[stream] = DbSync(
-                    connection, config, add_metadata_columns_to_schema(o)
+                    connection,
+                    config,
+                    add_metadata_columns_to_schema(o),
                 )
             else:
                 stream_to_sync[stream] = DbSync(connection, config, o)

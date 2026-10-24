@@ -15,10 +15,10 @@ from target_duckdb.db_sync import DbSync
 from target_duckdb.exceptions import ConfigError
 
 
-def test_config_validation():
+def test_config_validation() -> None:
     """Test configuration validator"""
     validator = target_duckdb.validate_config
-    empty_config = {}
+    empty_config: dict[str, Any] = {}
     minimal_config: dict[str, Any] = {
         "filepath": "dummy-value",
         "default_target_schema": "dummy-value",

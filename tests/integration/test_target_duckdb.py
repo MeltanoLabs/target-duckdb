@@ -79,13 +79,13 @@ class TestIntegration:
                     "c_int": 1,
                     "c_pk": 1,
                     "c_varchar": "1",
-                    "c_date": datetime.datetime(2019, 2, 1, 15, 12, 45),  # noqa: DTZ001
+                    "c_date": datetime.datetime(2019, 2, 1, 15, 12, 45),
                 },
                 {
                     "c_int": 2,
                     "c_pk": 2,
                     "c_varchar": "2",
-                    "c_date": datetime.datetime(2019, 2, 10, 2, 0, 0),  # noqa: DTZ001
+                    "c_date": datetime.datetime(2019, 2, 10, 2, 0, 0),
                 },
             ]
         else:
@@ -94,7 +94,7 @@ class TestIntegration:
                     "c_int": 2,
                     "c_pk": 2,
                     "c_varchar": "2",
-                    "c_date": datetime.datetime(2019, 2, 10, 2, 0, 0),  # noqa: DTZ001
+                    "c_date": datetime.datetime(2019, 2, 10, 2, 0, 0),
                 }
             ]
 
@@ -350,12 +350,12 @@ class TestIntegration:
             {
                 "new": "706b32",
                 "data": "6461746132",
-                "created_at": datetime.datetime(2019, 12, 17, 16, 2, 55),  # noqa: DTZ001
+                "created_at": datetime.datetime(2019, 12, 17, 16, 2, 55),
             },
             {
                 "new": "706b34",
                 "data": "6461746134",
-                "created_at": datetime.datetime(2019, 12, 17, 16, 32, 22),  # noqa: DTZ001
+                "created_at": datetime.datetime(2019, 12, 17, 16, 32, 22),
             },
         ]
 
@@ -658,14 +658,14 @@ class TestIntegration:
         record_32k = table_long_texts[4]
         assert [
             {
-                "c_int": int(record_4k.get("c_int")),
-                "c_pk": int(record_4k.get("c_pk")),
-                "len": len(record_4k.get("c_varchar")),
+                "c_int": int(record_4k["c_int"]),
+                "c_pk": int(record_4k["c_pk"]),
+                "len": len(record_4k["c_varchar"]),
             },
             {
-                "c_int": int(record_32k.get("c_int")),
-                "c_pk": int(record_32k.get("c_pk")),
-                "len": len(record_32k.get("c_varchar")),
+                "c_int": int(record_32k["c_int"]),
+                "c_pk": int(record_32k["c_pk"]),
+                "len": len(record_32k["c_varchar"]),
             },
         ] == [
             {"c_int": 4, "c_pk": 4, "len": 4017},
@@ -850,14 +850,14 @@ class TestIntegration:
         # Table two should have versioned column
         assert remove_metadata_columns_from_rows(table_two) == [
             {
-                previous_column_name: datetime.datetime(2019, 2, 1, 15, 12, 45),  # noqa: DTZ001
+                previous_column_name: datetime.datetime(2019, 2, 1, 15, 12, 45),
                 "c_int": 1,
                 "c_pk": 1,
                 "c_varchar": "1",
                 "c_date": None,
             },
             {
-                previous_column_name: datetime.datetime(2019, 2, 10, 2),  # noqa: DTZ001
+                previous_column_name: datetime.datetime(2019, 2, 10, 2),
                 "c_int": 2,
                 "c_pk": 2,
                 "c_varchar": "2",

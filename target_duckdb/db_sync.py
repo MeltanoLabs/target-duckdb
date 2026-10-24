@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import collections.abc
 import itertools
 import json
@@ -5,12 +7,15 @@ import os
 import re
 import time
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from target_duckdb.exceptions import ConfigError
 from target_duckdb.logger import get_logger
 from target_duckdb.metrics import emit_metric
+
+if TYPE_CHECKING:
+    import duckdb
 
 
 # copied from inflection.camelize to eliminate a dependency
@@ -217,7 +222,12 @@ def get_catalog_name(connection_config):
 
 # pylint: disable=too-many-public-methods,too-many-instance-attributes
 class DbSync:
-    def __init__(self, connection, connection_config, stream_schema_message=None):
+    def __init__(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+        connection_config: dict[str, Any],
+        stream_schema_message: dict[str, Any] | None = None,
+    ):
         """
         connection:  DuckDB connection
         connection_config: Connection config information
@@ -415,8 +425,11 @@ class DbSync:
             [temp_file_jsonl],
         )
 
-        if len(self.stream_schema_message["key_properties"]) > 0:
-            cur.execute(self.update_from_temp_table(temp_table))
+        if (
+            (len(self.stream_schema_message["key_properties"]) > 0)  # Stream has pkeys
+            and (update_dml := self.update_from_temp_table(temp_table))
+        ):
+            cur.execute(update_dml)
         cur.execute(self.insert_from_temp_table(temp_table))
         cur.execute(f"DROP TABLE {temp_table}")
         os.unlink(temp_file_jsonl)
@@ -487,10 +500,16 @@ class DbSync:
                 [file_path],
             )
 
-        count = cur.execute(f"SELECT COUNT(*) FROM {temp_table}").fetchone()[0]
+        count = 0
+        if result := cur.execute(f"SELECT COUNT(*) FROM {temp_table}").fetchone():
+            count = result[0]
 
-        if len(self.stream_schema_message["key_properties"]) > 0:
-            cur.execute(self.update_from_temp_table(temp_table))
+        if (
+            (len(self.stream_schema_message["key_properties"]) > 0)  # Stream has pkeys
+            and (update_dml := self.update_from_temp_table(temp_table))
+        ):
+            cur.execute(update_dml)
+
         cur.execute(self.insert_from_temp_table(temp_table))
         cur.execute(f"DROP TABLE {temp_table}")
 
@@ -562,7 +581,7 @@ class DbSync:
             self.primary_key_null_condition("t"),
         )
 
-    def update_from_temp_table(self, temp_table):
+    def update_from_temp_table(self, temp_table: str) -> str | None:
         stream_schema_message = self.stream_schema_message
         primary_key_columns = set(primary_column_names(self.stream_schema_message))
         columns = [x for x in self.column_names() if x not in primary_key_columns]
@@ -570,7 +589,7 @@ class DbSync:
 
         if not columns:
             # Nothing to do if all of the columns are PKs
-            return
+            return None
 
         return """UPDATE {} as s SET {} FROM {} t
         WHERE {}
@@ -614,12 +633,12 @@ class DbSync:
             primary_key = []
 
         if not table_name:
-            gen_table_name = self.table_name(
+            table_name = self.table_name(
                 stream_schema_message["stream"], is_temporary=is_temporary
             )
 
         return "CREATE TABLE IF NOT EXISTS {} ({})".format(
-            table_name if table_name else gen_table_name,
+            table_name,
             ", ".join(columns + primary_key),
         )
 
