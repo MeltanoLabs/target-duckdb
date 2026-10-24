@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import datetime
+import datetime as dt
 import json
 import unicodedata
 from collections.abc import Callable
@@ -79,13 +79,29 @@ class TestIntegration:
                     "c_int": 1,
                     "c_pk": 1,
                     "c_varchar": "1",
-                    "c_date": datetime.datetime(2019, 2, 1, 15, 12, 45),
+                    "c_date": dt.datetime(
+                        2019,
+                        2,
+                        1,
+                        15,
+                        12,
+                        45,
+                        tzinfo=dt.timezone.utc,
+                    ),
                 },
                 {
                     "c_int": 2,
                     "c_pk": 2,
                     "c_varchar": "2",
-                    "c_date": datetime.datetime(2019, 2, 10, 2, 0, 0),
+                    "c_date": dt.datetime(
+                        2019,
+                        2,
+                        10,
+                        2,
+                        0,
+                        0,
+                        tzinfo=dt.timezone.utc,
+                    ),
                 },
             ]
         else:
@@ -94,7 +110,15 @@ class TestIntegration:
                     "c_int": 2,
                     "c_pk": 2,
                     "c_varchar": "2",
-                    "c_date": datetime.datetime(2019, 2, 10, 2, 0, 0),
+                    "c_date": dt.datetime(
+                        2019,
+                        2,
+                        10,
+                        2,
+                        0,
+                        0,
+                        tzinfo=dt.timezone.utc,
+                    ),
                 }
             ]
 
@@ -110,19 +134,19 @@ class TestIntegration:
                     "c_int": 1,
                     "c_pk": 1,
                     "c_varchar": "1",
-                    "c_time": datetime.time(4, 0, 0),
+                    "c_time": dt.time(4, 0, 0),
                 },
                 {
                     "c_int": 2,
                     "c_pk": 2,
                     "c_varchar": "2",
-                    "c_time": datetime.time(7, 15, 0),
+                    "c_time": dt.time(7, 15, 0),
                 },
                 {
                     "c_int": 3,
                     "c_pk": 3,
                     "c_varchar": "3",
-                    "c_time": datetime.time(23, 0, 3),
+                    "c_time": dt.time(23, 0, 3),
                 },
             ]
         else:
@@ -131,13 +155,13 @@ class TestIntegration:
                     "c_int": 1,
                     "c_pk": 1,
                     "c_varchar": "1",
-                    "c_time": datetime.time(4, 0, 0),
+                    "c_time": dt.time(4, 0, 0),
                 },
                 {
                     "c_int": 2,
                     "c_pk": 2,
                     "c_varchar": "2",
-                    "c_time": datetime.time(7, 15, 0),
+                    "c_time": dt.time(7, 15, 0),
                 },
             ]
 
@@ -265,27 +289,27 @@ class TestIntegration:
             {"cid": 1, "ctimentz": None, "ctimetz": None},
             {
                 "cid": 2,
-                "ctimentz": datetime.time(23, 0, 15),
-                "ctimetz": datetime.time(23, 0, 15),
+                "ctimentz": dt.time(23, 0, 15),
+                "ctimetz": dt.time(23, 0, 15),
             },
             {
                 "cid": 3,
-                "ctimentz": datetime.time(12, 0, 15),
-                "ctimetz": datetime.time(12, 0, 15),
+                "ctimentz": dt.time(12, 0, 15),
+                "ctimetz": dt.time(12, 0, 15),
             },
             {
                 "cid": 4,
-                "ctimentz": datetime.time(12, 0, 15),
-                "ctimetz": datetime.time(9, 0, 15),
+                "ctimentz": dt.time(12, 0, 15),
+                "ctimetz": dt.time(9, 0, 15),
             },
             {
                 "cid": 5,
-                "ctimentz": datetime.time(12, 0, 15),
-                "ctimetz": datetime.time(15, 0, 15),
+                "ctimentz": dt.time(12, 0, 15),
+                "ctimetz": dt.time(15, 0, 15),
             },
-            {"cid": 6, "ctimentz": datetime.time(0, 0), "ctimetz": datetime.time(0, 0)},
-            {"cid": 8, "ctimentz": datetime.time(0, 0), "ctimetz": datetime.time(1, 0)},
-            {"cid": 9, "ctimentz": datetime.time(0, 0), "ctimetz": datetime.time(0, 0)},
+            {"cid": 6, "ctimentz": dt.time(0, 0), "ctimetz": dt.time(0, 0)},
+            {"cid": 8, "ctimentz": dt.time(0, 0), "ctimetz": dt.time(1, 0)},
+            {"cid": 9, "ctimentz": dt.time(0, 0), "ctimetz": dt.time(0, 0)},
         ]
 
         # Check if metadata columns replicated correctly
@@ -350,12 +374,28 @@ class TestIntegration:
             {
                 "new": "706b32",
                 "data": "6461746132",
-                "created_at": datetime.datetime(2019, 12, 17, 16, 2, 55),
+                "created_at": dt.datetime(
+                    2019,
+                    12,
+                    17,
+                    16,
+                    2,
+                    55,
+                    tzinfo=dt.timezone.utc,
+                ),
             },
             {
                 "new": "706b34",
                 "data": "6461746134",
-                "created_at": datetime.datetime(2019, 12, 17, 16, 32, 22),
+                "created_at": dt.datetime(
+                    2019,
+                    12,
+                    17,
+                    16,
+                    32,
+                    22,
+                    tzinfo=dt.timezone.utc,
+                ),
             },
         ]
 
@@ -850,14 +890,28 @@ class TestIntegration:
         # Table two should have versioned column
         assert remove_metadata_columns_from_rows(table_two) == [
             {
-                previous_column_name: datetime.datetime(2019, 2, 1, 15, 12, 45),
+                previous_column_name: dt.datetime(
+                    2019,
+                    2,
+                    1,
+                    15,
+                    12,
+                    45,
+                    tzinfo=dt.timezone.utc,
+                ),
                 "c_int": 1,
                 "c_pk": 1,
                 "c_varchar": "1",
                 "c_date": None,
             },
             {
-                previous_column_name: datetime.datetime(2019, 2, 10, 2),
+                previous_column_name: dt.datetime(
+                    2019,
+                    2,
+                    10,
+                    2,
+                    tzinfo=dt.timezone.utc,
+                ),
                 "c_int": 2,
                 "c_pk": 2,
                 "c_varchar": "2",
@@ -877,30 +931,30 @@ class TestIntegration:
             {
                 "c_int": 1,
                 "c_pk": 1,
-                "c_time": datetime.time(4, 0),
+                "c_time": dt.time(4, 0),
                 "c_varchar": "1",
                 "c_time_renamed": None,
             },
             {
                 "c_int": 2,
                 "c_pk": 2,
-                "c_time": datetime.time(7, 15),
+                "c_time": dt.time(7, 15),
                 "c_varchar": "2",
                 "c_time_renamed": None,
             },
             {
                 "c_int": 3,
                 "c_pk": 3,
-                "c_time": datetime.time(23, 0, 3),
+                "c_time": dt.time(23, 0, 3),
                 "c_varchar": "3",
-                "c_time_renamed": datetime.time(8, 15),
+                "c_time_renamed": dt.time(8, 15),
             },
             {
                 "c_int": 4,
                 "c_pk": 4,
                 "c_time": None,
                 "c_varchar": "4",
-                "c_time_renamed": datetime.time(23, 0, 3),
+                "c_time_renamed": dt.time(23, 0, 3),
             },
         ]
 
