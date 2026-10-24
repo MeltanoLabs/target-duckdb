@@ -513,8 +513,8 @@ class DbSync:
         Returns:
             The number of rows loaded.
         """
-        self.conn.execute("INSTALL nanoarrow FROM community")
-        self.conn.execute("LOAD nanoarrow")
+        self.conn.install_extension("nanoarrow", repository="community")
+        self.conn.load_extension("nanoarrow")
         return self._load_rows_from_files_by_name(file_paths, "read_arrow(?)", "Arrow")
 
     def load_rows_from_json_files(self, file_paths, compression=None):
