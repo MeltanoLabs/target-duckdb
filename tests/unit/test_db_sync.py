@@ -383,7 +383,7 @@ class TestLoadRows:
 class TestLoadRowsFromArrowFiles:
     """Exercises DbSync.load_rows_from_arrow_files against a real (local, in-memory)
     DuckDB connection and a real Arrow IPC file -- this needs network access the first
-    time, to fetch DuckDB's `arrow` community extension (cached locally afterwards)."""
+    time, to fetch DuckDB's `nanoarrow` community extension (cached locally afterwards)."""
 
     def _make_db_sync(
         self, local_connection, stream="mydb-mytable", key_properties=("id",)
