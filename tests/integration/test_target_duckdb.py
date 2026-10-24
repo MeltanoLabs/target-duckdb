@@ -79,29 +79,13 @@ class TestIntegration:
                     "c_int": 1,
                     "c_pk": 1,
                     "c_varchar": "1",
-                    "c_date": dt.datetime(
-                        2019,
-                        2,
-                        1,
-                        15,
-                        12,
-                        45,
-                        tzinfo=dt.timezone.utc,
-                    ),
+                    "c_date": dt.datetime(2019, 2, 1, 15, 12, 45),
                 },
                 {
                     "c_int": 2,
                     "c_pk": 2,
                     "c_varchar": "2",
-                    "c_date": dt.datetime(
-                        2019,
-                        2,
-                        10,
-                        2,
-                        0,
-                        0,
-                        tzinfo=dt.timezone.utc,
-                    ),
+                    "c_date": dt.datetime(2019, 2, 10, 2, 0, 0),
                 },
             ]
         else:
@@ -110,15 +94,7 @@ class TestIntegration:
                     "c_int": 2,
                     "c_pk": 2,
                     "c_varchar": "2",
-                    "c_date": dt.datetime(
-                        2019,
-                        2,
-                        10,
-                        2,
-                        0,
-                        0,
-                        tzinfo=dt.timezone.utc,
-                    ),
+                    "c_date": dt.datetime(2019, 2, 10, 2, 0, 0),
                 }
             ]
 
@@ -374,28 +350,12 @@ class TestIntegration:
             {
                 "new": "706b32",
                 "data": "6461746132",
-                "created_at": dt.datetime(
-                    2019,
-                    12,
-                    17,
-                    16,
-                    2,
-                    55,
-                    tzinfo=dt.timezone.utc,
-                ),
+                "created_at": dt.datetime(2019, 12, 17, 16, 2, 55),
             },
             {
                 "new": "706b34",
                 "data": "6461746134",
-                "created_at": dt.datetime(
-                    2019,
-                    12,
-                    17,
-                    16,
-                    32,
-                    22,
-                    tzinfo=dt.timezone.utc,
-                ),
+                "created_at": dt.datetime(2019, 12, 17, 16, 32, 22),
             },
         ]
 
@@ -890,28 +850,14 @@ class TestIntegration:
         # Table two should have versioned column
         assert remove_metadata_columns_from_rows(table_two) == [
             {
-                previous_column_name: dt.datetime(
-                    2019,
-                    2,
-                    1,
-                    15,
-                    12,
-                    45,
-                    tzinfo=dt.timezone.utc,
-                ),
+                previous_column_name: dt.datetime(2019, 2, 1, 15, 12, 45),
                 "c_int": 1,
                 "c_pk": 1,
                 "c_varchar": "1",
                 "c_date": None,
             },
             {
-                previous_column_name: dt.datetime(
-                    2019,
-                    2,
-                    10,
-                    2,
-                    tzinfo=dt.timezone.utc,
-                ),
+                previous_column_name: dt.datetime(2019, 2, 10, 2),
                 "c_int": 2,
                 "c_pk": 2,
                 "c_varchar": "2",
